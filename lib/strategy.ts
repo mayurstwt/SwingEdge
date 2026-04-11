@@ -8,6 +8,8 @@ import {
   calculateVolumeRatio,
 } from "./indicators";
 
+export const STRATEGY_VERSION = "1.2.0 (Pro)";
+
 export interface AnalysisResult {
   decision: "BUY" | "HOLD" | "AVOID";
   score: number;
@@ -35,6 +37,7 @@ export interface AnalysisResult {
   volumeRatio: number;
   trend: "UPTREND" | "DOWNTREND" | "SIDEWAYS";
   signals: string[];
+  reason: string;
   priceHistory: number[];
   sma50History: (number | null)[];
   sma200History: (number | null)[];
@@ -61,13 +64,8 @@ export function analyzeStock(
   const sma50 = sma50Arr[sma50Arr.length - 1];
   const sma200 = sma200Arr[sma200Arr.length - 1];
 
-  const sma20Arr = calculateSMA(closes, 20);
-  const sma20 = sma20Arr[sma20Arr.length - 1];
-
   const ema12Arr = calculateEMA(closes, 12);
   const ema26Arr = calculateEMA(closes, 26);
-  const ema12 = ema12Arr[ema12Arr.length - 1];
-  const ema26 = ema26Arr[ema26Arr.length - 1];
 
   const rsi = calculateRSI(closes, 14);
   const macd = calculateMACD(closes);
@@ -80,10 +78,12 @@ export function analyzeStock(
   const signals: string[] = [];
 
   // 1. Long-term trend: Price vs SMA200 (25 pts)
+  let trendAlignment = false;
   if (sma200 !== null) {
     if (price > sma200) {
       score += 25;
       signals.push("✅ Price above 200 SMA (Uptrend)");
+      trendAlignment = true;
     } else {
       signals.push("⚠️ Price below 200 SMA (Downtrend)");
     }
@@ -102,12 +102,12 @@ export function analyzeStock(
   // 3. Momentum: RSI zone (20 pts)
   if (rsi > 45 && rsi < 65) {
     score += 20;
-    signals.push(`✅ RSI healthy (${rsi.toFixed(1)}) — momentum zone`);
+    signals.push(`✅ RSI healthy (${rsi.toFixed(1)})`);
   } else if (rsi <= 35) {
-    score += 10; // Oversold — contrarian opportunity
-    signals.push(`⚠️ RSI oversold (${rsi.toFixed(1)}) — potential reversal`);
+    score += 10;
+    signals.push(`⚠️ RSI oversold (${rsi.toFixed(1)})`);
   } else if (rsi >= 70) {
-    signals.push(`❌ RSI overbought (${rsi.toFixed(1)}) — caution`);
+    signals.push(`❌ RSI overbought (${rsi.toFixed(1)})`);
   } else {
     score += 5;
     signals.push(`ℹ️ RSI neutral (${rsi.toFixed(1)})`);
@@ -120,10 +120,7 @@ export function analyzeStock(
       signals.push("✅ MACD bullish crossover above zero");
     } else if (macd.macdLine > macd.signalLine) {
       score += 12;
-      signals.push("✅ MACD bullish crossover (below zero)");
-    } else if (macd.histogram !== null && macd.histogram > 0) {
-      score += 5;
-      signals.push("ℹ️ MACD histogram positive");
+      signals.push("✅ MACD bullish crossover");
     } else {
       signals.push("❌ MACD bearish");
     }
@@ -132,45 +129,45 @@ export function analyzeStock(
   // 5. Bollinger Band position (10 pts)
   if (bb.upper !== null && bb.lower !== null && bb.middle !== null) {
     const bbRange = bb.upper - bb.lower;
-    const pricePos = (price - bb.lower) / bbRange; // 0=lower, 1=upper
+    const pricePos = (price - bb.lower) / bbRange; 
     if (pricePos > 0.3 && pricePos < 0.7) {
       score += 10;
-      signals.push("✅ Price in Bollinger mid-zone (stable)");
-    } else if (pricePos <= 0.3) {
-      score += 7;
-      signals.push("ℹ️ Price near lower Bollinger Band (potential bounce)");
-    } else {
-      signals.push("⚠️ Price near upper Bollinger Band (stretched)");
+      signals.push("✅ Price in BB stability zone");
     }
   }
 
   // 6. Volume confirmation (10 pts)
   if (volumeRatio > 1.2) {
     score += 10;
-    signals.push(`✅ Volume ${volumeRatio}x above average (confirmation)`);
-  } else if (volumeRatio > 0.8) {
-    score += 5;
-    signals.push(`ℹ️ Volume normal (${volumeRatio}x average)`);
-  } else {
-    signals.push(`⚠️ Volume below average (${volumeRatio}x) — weak move`);
+    signals.push(`✅ Volume surge (${volumeRatio}x)`);
   }
 
-  // --- Decision ---
+  // --- Pro Strategy Filters ---
   let decision: "BUY" | "HOLD" | "AVOID";
-  if (score >= 65) decision = "BUY";
-  else if (score >= 35) decision = "HOLD";
-  else decision = "AVOID";
+  let reason = "";
 
-  const confidence = Math.min(score, 100);
+  // 1. Volatility Filter (ATR > 4% of price is too risky)
+  const volatility = (atr / price) * 100;
+  const isTooVolatile = volatility > 4;
 
-  // --- Trend ---
-  let trend: "UPTREND" | "DOWNTREND" | "SIDEWAYS";
-  if (sma50 !== null && sma200 !== null) {
-    if (price > sma50 && sma50 > sma200) trend = "UPTREND";
-    else if (price < sma50 && sma50 < sma200) trend = "DOWNTREND";
-    else trend = "SIDEWAYS";
+  if (isTooVolatile) {
+    decision = "AVOID";
+    reason = `Volatility too high (${volatility.toFixed(1)}%). Risk exceeds safe parameters.`;
+  } else if (score >= 65) {
+    // 2. Trend Alignment Rule (Must be above 200 SMA to BUY)
+    if (trendAlignment) {
+      decision = "BUY";
+      reason = signals.filter(s => s.startsWith("✅")).slice(0, 3).join(", ");
+    } else {
+      decision = "HOLD";
+      reason = "Bullish momentum detected but price is below 200 SMA (Catching falling knife risk).";
+    }
+  } else if (score >= 35) {
+    decision = "HOLD";
+    reason = "Neutral trend with mixed indicators.";
   } else {
-    trend = "SIDEWAYS";
+    decision = "AVOID";
+    reason = "Strong bearish pressure. RSI/MACD confirm negative trend.";
   }
 
   // --- Risk Management ---
@@ -180,19 +177,17 @@ export function analyzeStock(
   const reward = target - price;
   const riskReward = parseFloat((reward / risk).toFixed(2));
 
-  // Entry zone: slightly below current price for better entry
   const entryZone = {
     low: parseFloat((price - 0.5 * atr).toFixed(2)),
     high: parseFloat((price + 0.3 * atr).toFixed(2)),
   };
 
-  // Limit price history to last 90 data points for chart
   const historySlice = Math.min(closes.length, 90);
 
   return {
     decision,
     score: Math.round(score),
-    confidence,
+    confidence: Math.min(score, 100),
     price: parseFloat(price.toFixed(2)),
     change: parseFloat(change.toFixed(2)),
     changePercent: parseFloat(changePercent.toFixed(2)),
@@ -206,8 +201,9 @@ export function analyzeStock(
     target,
     riskReward,
     volumeRatio,
-    trend,
+    trend: price > (sma50 || 0) && (sma50 || 0) > (sma200 || 0) ? "UPTREND" : (price < (sma50 || 0) ? "DOWNTREND" : "SIDEWAYS"),
     signals,
+    reason,
     priceHistory: closes.slice(-historySlice).map((v) => parseFloat(v.toFixed(2))),
     sma50History: sma50Arr.slice(-historySlice),
     sma200History: sma200Arr.slice(-historySlice),

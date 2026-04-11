@@ -1,108 +1,64 @@
-# 📊 SwingEdge — High Performance Trading Terminal
+# 📊 SwingEdge — Professional Trading Terminal
 
-**SwingEdge** is a professional-grade swing trading web terminal for Indian NSE stocks. It combines real-time technical analysis with an automated daily strategy engine and a realistic paper-trading simulator.
+**SwingEdge** is an institutional-grade swing trading terminal for Indian NSE stocks. Built with Next.js and Supabase, it features automated paper trading with professional-grade risk management and a transparent audit trail.
 
 ---
 
-## 🚀 Key Features
+## 🚀 Pro-Grade Features
 
-- **Multi-Factor Strategy**: Real-time analysis using RSI, MACD, Bollinger Bands, and SMA crossovers.
-- **Automated Signals**: Daily stock scanning triggered by GitHub Actions (9 PM IST).
-- **Realistic Paper Trading**: Start with ₹0, deposit funds, and simulate trades with actual Indian brokerage overheads (STT, DP Charges, Brokerage).
-- **Interactive UI**: Dark-mode terminal with price visualization and "Price Ruler" for entry/stop-loss.
-- **Serverless Backend**: Powered by Next.js, Netlify, and Supabase.
+- **Multi-Factor Analysis**: Uses RSI (14), MACD (12,26,9), Bollinger Bands (20,2), SMA (50, 200), and ATR Volatility.
+- **Institutional Risk Management (Circuit Breakers)**:
+    - **5% Daily Drawdown**: Stops all Auto-Buy actions if the total portfolio value drops 5% in a single day.
+    - **Concentration Limits**: Limits exposure to any single sector (e.g., Banking, IT) to 25% of total capital.
+    - **Volatility Filter**: Automatically avoids stocks with daily volatility (ATR/Price) > 4%.
+- **Realistic Execution (Slippage Simulation)**:
+    - Every automated trade includes a **0.05% slippage penalty** to simulate real-world market friction.
+    - **Liquidity Filter**: Only trades stocks with a 20-day Average Daily Volume > ₹50 Crores.
+- **Strategic Refinements**:
+    - **No-Gap-Up**: Automatically cancels entries if a stock jumps >2% at the open.
+    - **Time-Stop**: Automatically exits positions after **15 trading days** to maximize capital efficiency.
+    - **Trend Alignment**: Only buys stocks trading above their 200-day Simple Moving Average (SMA).
+- **Audit Trail & Governance**:
+    - **"The Why" Log**: Every signal and trade stores its logical justification (e.g., "RSI Oversold + Above 200 SMA").
+    - **Strategy Versioning**: Every automated trade is tagged with the logic version used (e.g., `Pro 1.2.0`).
 
 ---
 
 ## 🛠️ Technology Stack
 
-- **Frontend**: Next.js 16+, Tailwind CSS, Chart.js, Fuse.js (Search).
-- **Backend**: Next.js API Routes (converted to Netlify Edge/Serverless functions).
+- **Frontend**: Next.js 16+, Tailwind CSS, Chart.js.
+- **Backend**: Next.js API Routes (Serverless via Netlify).
 - **Database**: Supabase (PostgreSQL).
-- **Automation**: GitHub Actions (Cron trigger).
-- **Data Source**: Yahoo Finance v8 API.
+- **Automation**: GitHub Actions (Cron triggers).
 
 ---
 
-## 📦 Developer Quick Start
+## 🤖 Automation Engine
 
-### 1. Prerequisites
-- Node.js 20+
-- A [Supabase](https://supabase.com) project.
-- A [Netlify](https://netlify.com) account.
-
-### 2. Local Setup
-```bash
-# Clone the repo
-git clone <repository-url>
-cd stockMarket
-
-# Install dependencies
-npm install
-
-# Setup Env Vars
-cp .env.local.example .env.local
-# Edit .env.local and add your Supabase credentials
-```
-
-### 3. Database Initialization
-Go to your Supabase project **SQL Editor** and execute the contents of:
-- `supabase/schema.sql`
-This will create the `signals`, `trades`, and `wallet` tables with pre-configured RLS policies.
-
-### 4. Run Development Server
-```bash
-npm run dev
-# Dashboard available at http://localhost:3000
-```
+- **Scan Time**: 9:00 PM IST (Daily).
+- **Decision Engine**: `lib/strategy.ts` (Score 70+ for AUTO-BUY).
+- **Execution Engine**: `lib/wallet.ts` (Handles slippage, commissions, and capital allocation).
 
 ---
 
-## 🤖 Automation (GitHub Actions)
+## 📈 Paper Portfolio Rules
 
-To ensure the "Daily Signals" tab is updated automatically:
-
-1. Go to your **GitHub Repository Settings** -> **Secrets and variables** -> **Actions**.
-2. Add the following **Repository secrets**:
-   - `NETLIFY_APP_URL`: Your deployed URL (e.g., `https://swingedge.netlify.app`).
-   - `CRON_SECRET`: A random string (must match the `CRON_SECRET` in your `.env.local` / Netlify settings).
-
-The workflow inside `.github/workflows/daily-strategy.yml` is scheduled to run at **15:30 UTC (9:00 PM IST)** every Monday-Friday.
+- **Allocation**: Default of ₹10,000 per automated trade.
+- **Brokerage**: Simulates STT (0.1%), Brokerage (Max ₹20), and DP Charges (₹18.8 on Sell).
+- **Starting Balance**: ₹0. Use the **+ Deposit** button in the Wallet Panel to seed your account.
 
 ---
 
-## 🌍 Deployment (Netlify)
+## 📁 Project Structure
 
-1. Connect your repository to **Netlify**.
-2. Set the **Build Settings**:
-   - Build Command: `npm run build`
-   - Publish Directory: `.next`
-3. Add **Environment Variables** in the Netlify Dashboard:
-   - `NEXT_PUBLIC_SUPABASE_URL`
-   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-   - `CRON_SECRET`
-
----
-
-## 📈 Brokerage Simulator Logic
-
-The internal wallet system uses a realistic Indian brokerage model:
-- **Buy Side**: `Amount * 0.1% (STT) + 0.05% (Brokerage, Max ₹20)`.
-- **Sell Side**: `Amount * 0.1% (STT) + 0.05% (Brokerage, Max ₹20) + ₹18.8 (DP Charges)`.
-- **Note**: The paper wallet starts at ₹0. Use the **+ Deposit** button to add virtual funds.
-
----
-
-## 📁 Project Structure for New Devs
-
-- `/app/api`: Serverless API routes for analysis, searching, and wallet management.
-- `/lib`: Core logic.
-    - `indicators.ts`: Pure JS implementation of technical indicators.
-    - `strategy.ts`: Scoring engine (weights, decision thresholds).
-- `/components`: UI units (Card, Chart, Dashboard, Wallet).
-- `/data`: Static stock universe metadata.
+- `/app/api`: Serverless trading routes.
+- `/lib`:
+    - `indicators.ts`: Quantitative math.
+    - `strategy.ts`: Pro-Logic version `1.2.0`.
+    - `wallet.ts`: Brokerage & Slippage engine.
+    - `supabase.ts`: Database interfaces.
 
 ---
 
 ## ⚖️ Disclaimer
-This tool is for **educational purposes only**. All trading signals are procedurally generated by technical indicators. Always consult a certified financial advisor before making real investments.
+This tool is for **educational/simulation purposes only**. Trading involves real risk. Always consult a professional before making actual investments.

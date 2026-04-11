@@ -1,20 +1,5 @@
 import { getSupabase } from '@/lib/supabase';
-
-/**
- * Realistic Indian Brokerage Calculation (Groww-style)
- * STT: 0.1% for Delivery Buy & Sell
- * Brokerage: 0.05% or ₹20 (whichever is lower)
- * DP Charges: ₹15.93 + GST (~₹18.8) on Sell transactions
- * SEBI/Stamp: ~0.02% approximation
- */
-function calculateCharges(amount: number, type: 'buy' | 'sell'): number {
-  const stt = amount * 0.001; // 0.1%
-  const brokerage = Math.min(20, amount * 0.0005); // 0.05% or 20
-  const flatFees = type === 'sell' ? 18.8 : 0; // DP Charges on sell
-  const regulatory = amount * 0.0002; // SEBI + Stamp + GST overhead approx
-  
-  return Number((stt + brokerage + flatFees + regulatory).toFixed(2));
-}
+import { calculateCharges } from '@/lib/wallet';
 
 export async function GET() {
   try {
@@ -68,7 +53,7 @@ export async function POST(req: Request) {
       return Response.json({ success: true, balance: newBalance });
     }
 
-    // 2. Action: Open Trade
+    // 2. Action: Open Trade (Manual)
     if (action === 'open') {
       const { symbol, short_name, buy_price, quantity = 1 } = body;
       const tradeValue = buy_price * quantity;
@@ -100,7 +85,7 @@ export async function POST(req: Request) {
       return Response.json({ success: true, charges });
     }
 
-    // 3. Action: Close Trade
+    // 3. Action: Close Trade (Manual)
     if (action === 'close') {
       const { trade_id, sell_price } = body;
       const { data: trade } = await supabase.from('trades').select('*').eq('id', trade_id).single();

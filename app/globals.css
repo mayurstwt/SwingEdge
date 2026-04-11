@@ -2341,3 +2341,115 @@ body {
 .mt-4 {
   margin-top: 1rem;
 }
+/* ── Automation UI Improvements ── */
+.trade-header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.auto-badge {
+  font-size: 0.6rem;
+  font-weight: 800;
+  background: rgba(0, 212, 255, 0.15);
+  color: var(--accent-cyan);
+  padding: 2px 5px;
+  border-radius: 4px;
+  border: 1px solid rgba(0, 212, 255, 0.3);
+  letter-spacing: 0.05em;
+}
+
+.trade-levels {
+  display: flex;
+  gap: 12px;
+  margin-top: 4px;
+  margin-bottom: 4px;
+}
+
+.level-item {
+  font-size: 0.7rem;
+  font-family: var(--font-mono);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.level-item.SL { color: var(--color-avoid); }
+.level-item.TGT { color: var(--color-buy); }
+
+.level-item::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.level-item.SL::before { background: var(--color-avoid); box-shadow: 0 0 8px var(--color-avoid); }
+.level-item.TGT::before { background: var(--color-buy); box-shadow: 0 0 8px var(--color-buy); }
+
+/* ── Pro UI Improvements ── */
+.sector-tag {
+  font-size: 0.65rem;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-dim);
+  padding: 2px 6px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.trade-reason {
+  font-size: 0.8rem;
+  font-style: italic;
+  color: var(--accent-cyan);
+  margin-top: 6px;
+  margin-bottom: 2px;
+  line-height: 1.4;
+  opacity: 0.85;
+}
+
+.level-item.TGT { color: #00ff99; }
+.level-item.SL { color: #ff3d71; }
+
+/* ── Debug & Pro UI ── */
+.auto-label {
+  font-size: 0.6rem;
+  background: var(--accent-cyan);
+  color: #000;
+  padding: 1px 4px;
+  border-radius: 3px;
+  vertical-align: middle;
+  margin-left: 8px;
+}
+
+.dash-error {
+  background: rgba(255, 61, 113, 0.1);
+  border: 1px solid var(--color-avoid);
+  padding: 12px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.debug-logs {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  margin-top: 10px;
+  color: #ff8aab;
+  background: rgba(0,0,0,0.2);
+  padding: 8px;
+  border-radius: 4px;
+}
+
+.log-line {
+  margin-bottom: 2px;
+}
+
+.reason-cell {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  max-width: 250px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.skeleton-row.tall { height: 200px; opacity: 0.3; }

@@ -9,7 +9,6 @@ export default function WalletPanel() {
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'open' | 'closed'>('open');
 
-  // Form states
   const [showTradeForm, setShowTradeForm] = useState(false);
   const [showDepositForm, setShowDepositForm] = useState(false);
   const [showWithdrawForm, setShowWithdrawForm] = useState(false);
@@ -45,25 +44,17 @@ export default function WalletPanel() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'deposit', amount: val }),
       });
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Deposit failed');
-      }
+      if (!res.ok) throw new Error('Deposit failed');
       setDepositAmount('');
       setShowDepositForm(false);
       await fetchWallet();
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setIsSubmitting(false);
-    }
+    } catch (err: any) { setError(err.message); } finally { setIsSubmitting(false); }
   };
 
   const handleWithdraw = async () => {
     const val = parseFloat(withdrawAmount);
     if (isNaN(val) || val <= 0) return setError('Enter a valid amount');
     if (balance !== null && val > balance) return setError('Insufficient funds');
-
     setIsSubmitting(true);
     try {
       const res = await fetch('/api/wallet', {
@@ -71,16 +62,11 @@ export default function WalletPanel() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'withdraw', amount: val }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Withdrawal failed');
+      if (!res.ok) throw new Error('Withdrawal failed');
       setWithdrawAmount('');
       setShowWithdrawForm(false);
       await fetchWallet();
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setIsSubmitting(false);
-    }
+    } catch (err: any) { setError(err.message); } finally { setIsSubmitting(false); }
   };
 
   const handleOpenTrade = async () => {
@@ -88,7 +74,6 @@ export default function WalletPanel() {
     const price = parseFloat(tradeForm.buy_price);
     const qty = parseInt(tradeForm.quantity);
     if (!tradeForm.symbol || isNaN(price) || isNaN(qty)) return setError('Fill all fields');
-
     setIsSubmitting(true);
     try {
       const res = await fetch('/api/wallet', {
@@ -102,16 +87,11 @@ export default function WalletPanel() {
           quantity: qty,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to open trade');
+      if (!res.ok) throw new Error('Failed to open trade');
       setTradeForm({ symbol: '', short_name: '', buy_price: '', quantity: '1' });
       setShowTradeForm(false);
       await fetchWallet();
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setIsSubmitting(false);
-    }
+    } catch (err: any) { setError(err.message); } finally { setIsSubmitting(false); }
   };
 
   const handleCloseTrade = async (trade: TradeRow) => {
@@ -119,7 +99,6 @@ export default function WalletPanel() {
     if (!sellPriceStr) return;
     const sellPrice = parseFloat(sellPriceStr);
     if (isNaN(sellPrice)) return alert('Invalid price');
-
     const res = await fetch('/api/wallet', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -146,84 +125,50 @@ export default function WalletPanel() {
           <span className="balance-label">Cash Balance</span>
           <span className="balance-value">{balance !== null ? fmt(balance) : '—'}</span>
           <div className="charges-note">
-            Total simulated charges paid: <span className="avoid-color">{fmt(totalCharges)}</span>
+            Includes simulated <span className="avoid-color">slippage + charges</span>
           </div>
         </div>
-
         <div className="wallet-actions">
-          <button className="add-funds-btn" onClick={() => { setShowDepositForm(!showDepositForm); setShowWithdrawForm(false); setShowTradeForm(false); }}>
-            {showDepositForm ? '✕' : '+ Deposit'}
-          </button>
-          <button className="add-funds-btn" onClick={() => { setShowWithdrawForm(!showWithdrawForm); setShowDepositForm(false); setShowTradeForm(false); }}>
-            {showWithdrawForm ? '✕' : '- Withdraw'}
-          </button>
-          <button className="open-trade-btn" onClick={() => { setShowTradeForm(!showTradeForm); setShowDepositForm(false); setShowWithdrawForm(false); }}>
-            {showTradeForm ? '✕' : '+ Buy Stock'}
-          </button>
+          <button className="add-funds-btn" onClick={() => { setShowDepositForm(!showDepositForm); setShowWithdrawForm(false); setShowTradeForm(false); }}>{showDepositForm ? '✕' : '+ Deposit'}</button>
+          <button className="add-funds-btn" onClick={() => { setShowWithdrawForm(!showWithdrawForm); setShowDepositForm(false); setShowTradeForm(false); }}>{showWithdrawForm ? '✕' : '- Withdraw'}</button>
+          <button className="open-trade-btn" onClick={() => { setShowTradeForm(!showTradeForm); setShowDepositForm(false); setShowWithdrawForm(false); }}>{showTradeForm ? '✕' : '+ Buy'}</button>
         </div>
-
       </div>
 
-      {/* ── Deposit Form ── */}
       {showDepositForm && (
         <div className="trade-form slide-in">
-          <h4 className="form-title">Deposit Paper Money</h4>
+          <h4 className="form-title">Deposit Funds</h4>
           <div className="form-row">
-            <input
-              className="form-input"
-              type="number"
-              placeholder="Amount to add ₹"
-              value={depositAmount}
-              onChange={e => setDepositAmount(e.target.value)}
-            />
-            <button className="submit-trade-btn" onClick={handleDeposit} disabled={isSubmitting}>Confirm Deposit</button>
+            <input className="form-input" type="number" placeholder="₹ Amount" value={depositAmount} onChange={e => setDepositAmount(e.target.value)} />
+            <button className="submit-trade-btn" onClick={handleDeposit} disabled={isSubmitting}>Confirm</button>
           </div>
         </div>
       )}
 
-      {/* ── Withdraw Form ── */}
       {showWithdrawForm && (
         <div className="trade-form slide-in">
-          <h4 className="form-title">Withdraw Paper Money</h4>
+          <h4 className="form-title">Withdraw Funds</h4>
           <div className="form-row">
-            <input
-              className="form-input"
-              type="number"
-              placeholder="Amount to withdraw ₹"
-              value={withdrawAmount}
-              onChange={e => setWithdrawAmount(e.target.value)}
-            />
-            <button className="submit-trade-btn" onClick={handleWithdraw} disabled={isSubmitting} style={{ background: 'rgba(255, 61, 113, 0.2)', borderColor: 'rgba(255, 61, 113, 0.35)', color: 'var(--color-avoid)' }}>
-              Confirm Withdrawal
-            </button>
+            <input className="form-input" type="number" placeholder="₹ Amount" value={withdrawAmount} onChange={e => setWithdrawAmount(e.target.value)} />
+            <button className="submit-trade-btn" onClick={handleWithdraw} disabled={isSubmitting} style={{ background: 'rgba(255, 61, 113, 0.2)', color: 'var(--color-avoid)' }}>Confirm</button>
           </div>
         </div>
       )}
 
-      {/* ── Trade Form ── */}
       {showTradeForm && (
         <div className="trade-form slide-in">
-          <h4 className="form-title">Buy Stock (Paper Trade)</h4>
+          <h4 className="form-title">Manual Paper Trade</h4>
           <div className="form-row">
-            <input className="form-input" placeholder="Symbol (e.g. INFY)" value={tradeForm.symbol} onChange={e => setTradeForm({ ...tradeForm, symbol: e.target.value })} />
-            <input className="form-input" type="number" placeholder="Buy Price ₹" value={tradeForm.buy_price} onChange={e => setTradeForm({ ...tradeForm, buy_price: e.target.value })} />
+            <input className="form-input" placeholder="Symbol" value={tradeForm.symbol} onChange={e => setTradeForm({ ...tradeForm, symbol: e.target.value })} />
+            <input className="form-input" type="number" placeholder="Buy Price" value={tradeForm.buy_price} onChange={e => setTradeForm({ ...tradeForm, buy_price: e.target.value })} />
             <input className="form-input" type="number" placeholder="Qty" value={tradeForm.quantity} onChange={e => setTradeForm({ ...tradeForm, quantity: e.target.value })} />
           </div>
-          <button className="submit-trade-btn" onClick={handleOpenTrade} disabled={isSubmitting}>Buy Now</button>
+          <button className="submit-trade-btn" onClick={handleOpenTrade} disabled={isSubmitting}>Open Trade</button>
         </div>
       )}
 
-      {error && <div className="form-error-msg">{error}</div>}
-
-      {/* ── Stats ── */}
-      <div className="wallet-stats">
-        <div className="wstat"><span className="wstat-label">Open Trades</span><span className="wstat-val">{openTrades.length}</span></div>
-        <div className="wstat"><span className="wstat-label">Net Profit</span><span className={`wstat-val ${totalPnL >= 0 ? 'buy-color' : 'avoid-color'}`}>{totalPnL >= 0 ? '+' : ''}{fmt(totalPnL)}</span></div>
-      </div>
-
-      {/* ── Tabs ── */}
       <div className="trade-tabs mt-4">
-        <button className={`trade-tab ${activeTab === 'open' ? 'active' : ''}`} onClick={() => setActiveTab('open')}>Active</button>
+        <button className={`trade-tab ${activeTab === 'open' ? 'active' : ''}`} onClick={() => setActiveTab('open')}>Active Positions ({openTrades.length})</button>
         <button className={`trade-tab ${activeTab === 'closed' ? 'active' : ''}`} onClick={() => setActiveTab('closed')}>History</button>
       </div>
 
@@ -231,16 +176,26 @@ export default function WalletPanel() {
         {(activeTab === 'open' ? openTrades : closedTrades).map(trade => (
           <div key={trade.id} className="trade-card">
             <div className="trade-left">
-              <span className="trade-sym">{trade.symbol.replace('.NS', '')}</span>
+              <div className="trade-header-row">
+                <span className="trade-sym">{trade.symbol.replace('.NS', '')}</span>
+                {trade.executed_by === 'AUTO' && <span className="auto-badge">PRO {trade.strategy_version?.split(' ')[0]}</span>}
+                <span className="sector-tag">{trade.sector || 'Misc'}</span>
+              </div>
               <span className="trade-meta">{trade.quantity} @ {fmt(trade.buy_price)}</span>
-              {trade.charges > 0 && <span className="trade-charges">Charges: {fmt(trade.charges)}</span>}
+              {trade.reason && <p className="trade-reason">"{trade.reason}"</p>}
+              {trade.status === 'OPEN' && trade.stop_loss && (
+                <div className="trade-levels">
+                  <span className="level-item SL">SL: {fmt(trade.stop_loss)}</span>
+                  <span className="level-item TGT">TGT: {fmt(trade.target || 0)}</span>
+                </div>
+              )}
             </div>
             <div className="trade-right">
               {trade.status === 'OPEN' ? (
                 <button className="close-trade-btn" onClick={() => handleCloseTrade(trade)}>Sell</button>
               ) : (
                 <div className="trade-result">
-                  <span className="trade-meta">Exit: {fmt(trade.sell_price || 0)}</span>
+                  <span className="trade-meta">Sold at {fmt(trade.sell_price || 0)}</span>
                   <span className={`trade-pnl ${Number(trade.profit_loss) >= 0 ? 'buy-color' : 'avoid-color'}`}>
                     {Number(trade.profit_loss) >= 0 ? '+' : ''}{fmt(trade.profit_loss || 0)}
                   </span>

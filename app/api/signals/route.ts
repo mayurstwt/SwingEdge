@@ -1,38 +1,40 @@
 import { getSupabase } from '@/lib/supabase';
 
 export async function GET() {
-  const today = new Date().toISOString().slice(0, 10);
+  const supabase = getSupabase();
+  const now = new Date();
+  const today = now.toISOString().split('T')[0];
 
-  // Try today first, fall back to most recent run date
-  let { data, error } = await getSupabase()
-    .from('signals')
-    .select('*')
-    .eq('run_date', today)
-    .order('score', { ascending: false });
-
-  if (!error && (!data || data.length === 0)) {
-    // No signals for today — get most recent available date
-    const { data: latest } = await getSupabase()
+  // Logic: 
+  // 1. Try to find signals for the exact 'today' date.
+  // 2. If empty, find the most recent available date in the signals table and return those.
+  
+  try {
+    const { data: latestRun } = await supabase
       .from('signals')
       .select('run_date')
       .order('run_date', { ascending: false })
       .limit(1)
       .single();
 
-    if (latest?.run_date) {
-      const result = await getSupabase()
-        .from('signals')
-        .select('*')
-        .eq('run_date', latest.run_date)
-        .order('score', { ascending: false });
-      data = result.data;
-      error = result.error;
+    if (!latestRun) {
+      return Response.json({ signals: [], run_date: null });
     }
-  }
 
-  if (error) {
-    return Response.json({ error: error.message }, { status: 500 });
-  }
+    const { data, error } = await supabase
+      .from('signals')
+      .select('*')
+      .eq('run_date', latestRun.run_date)
+      .order('score', { ascending: false });
 
-  return Response.json({ signals: data ?? [], run_date: data?.[0]?.run_date ?? null });
+    if (error) throw error;
+
+    return Response.json({ 
+      signals: data ?? [], 
+      run_date: latestRun.run_date,
+      fetched_at: today 
+    });
+  } catch (err: any) {
+    return Response.json({ error: err.message }, { status: 500 });
+  }
 }
