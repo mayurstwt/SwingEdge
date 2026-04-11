@@ -47,6 +47,17 @@ async function fetchAndAnalyze(symbol: string, name: string) {
 }
 
 export async function POST(req: Request) {
+  // ── Security: validate cron secret ──────────────────────────
+  const cronSecret = process.env.CRON_SECRET;
+  const isDev = process.env.NODE_ENV === 'development';
+
+  if (cronSecret && !isDev) {
+    const incoming = req.headers.get('x-cron-secret');
+    if (incoming !== cronSecret) {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+  }
+
   // Use a stable date format (YYYY-MM-DD)
   const now = new Date();
   const todayStr = now.toISOString().split('T')[0];
