@@ -1,0 +1,138 @@
+import { getSupabase } from '@/lib/supabase';
+
+/**
+ * Realistic Indian Brokerage Calculation (Groww-style)
+ * STT: 0.1% for Delivery Buy & Sell
+ * Brokerage: 0.05% or ₹20 (whichever is lower)
+ * DP Charges: ₹15.93 + GST (~₹18.8) on Sell transactions
+ * SEBI/Stamp: ~0.02% approximation
+ */
+function calculateCharges(amount: number, type: 'buy' | 'sell'): number {
+  const stt = amount * 0.001; // 0.1%
+  const brokerage = Math.min(20, amount * 0.0005); // 0.05% or 20
+  const flatFees = type === 'sell' ? 18.8 : 0; // DP Charges on sell
+  const regulatory = amount * 0.0002; // SEBI + Stamp + GST overhead approx
+  
+  return Number((stt + brokerage + flatFees + regulatory).toFixed(2));
+}
+
+export async function GET() {
+  try {
+    const supabase = getSupabase();
+    const [walletRes, tradesRes] = await Promise.all([
+      supabase.from('wallet').select('*').eq('id', 1).single(),
+      supabase.from('trades').select('*').order('opened_at', { ascending: false }),
+    ]);
+
+    return Response.json({
+      balance: walletRes.data?.balance ?? 0,
+      trades:  tradesRes.data ?? [],
+    });
+  } catch (err) {
+    return Response.json({ error: 'DB Connection Error' }, { status: 500 });
+  }
+}
+
+export async function POST(req: Request) {
+  try {
+    const supabase = getSupabase();
+    const body = await req.json();
+    const { action } = body;
+
+    // 1. Action: Deposit
+    if (action === 'deposit') {
+      const { amount } = body;
+      if (!amount || amount <= 0) return Response.json({ error: 'Invalid amount' }, { status: 400 });
+
+      const { data: wallet } = await supabase.from('wallet').select('balance').eq('id', 1).single();
+      const newBalance = (wallet?.balance ?? 0) + amount;
+
+      await supabase.from('wallet').update({ balance: newBalance, updated_at: new Date().toISOString() }).eq('id', 1);
+      return Response.json({ success: true, balance: newBalance });
+    }
+
+    // 1b. Action: Withdraw
+    if (action === 'withdraw') {
+      const { amount } = body;
+      if (!amount || amount <= 0) return Response.json({ error: 'Invalid amount' }, { status: 400 });
+
+      const { data: wallet } = await supabase.from('wallet').select('balance').eq('id', 1).single();
+      const currentBalance = wallet?.balance ?? 0;
+
+      if (currentBalance < amount) {
+        return Response.json({ error: 'Insufficient funds for withdrawal' }, { status: 400 });
+      }
+
+      const newBalance = currentBalance - amount;
+      await supabase.from('wallet').update({ balance: newBalance, updated_at: new Date().toISOString() }).eq('id', 1);
+      return Response.json({ success: true, balance: newBalance });
+    }
+
+    // 2. Action: Open Trade
+    if (action === 'open') {
+      const { symbol, short_name, buy_price, quantity = 1 } = body;
+      const tradeValue = buy_price * quantity;
+      const charges = calculateCharges(tradeValue, 'buy');
+      const totalCost = tradeValue + charges;
+
+      const { data: wallet } = await supabase.from('wallet').select('balance').eq('id', 1).single();
+      const currentBalance = wallet?.balance ?? 0;
+
+      if (currentBalance < totalCost) {
+        return Response.json({ error: `Need ₹${totalCost.toFixed(2)} (including ₹${charges} charges). Balance: ₹${currentBalance.toFixed(2)}` }, { status: 400 });
+      }
+
+      await Promise.all([
+        supabase.from('trades').insert({
+          symbol,
+          short_name: short_name ?? symbol,
+          buy_price,
+          quantity,
+          charges,
+          status: 'OPEN',
+        }),
+        supabase.from('wallet').update({
+          balance: currentBalance - totalCost,
+          updated_at: new Date().toISOString(),
+        }).eq('id', 1),
+      ]);
+
+      return Response.json({ success: true, charges });
+    }
+
+    // 3. Action: Close Trade
+    if (action === 'close') {
+      const { trade_id, sell_price } = body;
+      const { data: trade } = await supabase.from('trades').select('*').eq('id', trade_id).single();
+      if (!trade || trade.status === 'CLOSED') return Response.json({ error: 'Trade invalid' }, { status: 400 });
+
+      const sellValue = sell_price * trade.quantity;
+      const sellCharges = calculateCharges(sellValue, 'sell');
+      const proceeds = sellValue - sellCharges;
+      const totalCharges = Number(trade.charges) + sellCharges;
+      const profit_loss = proceeds - (trade.buy_price * trade.quantity);
+
+      const { data: wallet } = await supabase.from('wallet').select('balance').eq('id', 1).single();
+
+      await Promise.all([
+        supabase.from('trades').update({
+          sell_price,
+          status: 'CLOSED',
+          charges: totalCharges,
+          profit_loss,
+          closed_at: new Date().toISOString(),
+        }).eq('id', trade_id),
+        supabase.from('wallet').update({
+          balance: (wallet?.balance ?? 0) + proceeds,
+          updated_at: new Date().toISOString(),
+        }).eq('id', 1),
+      ]);
+
+      return Response.json({ success: true, profit_loss, sellCharges });
+    }
+
+    return Response.json({ error: 'Invalid action' }, { status: 400 });
+  } catch (err: any) {
+    return Response.json({ error: err.message }, { status: 500 });
+  }
+}

@@ -1,0 +1,9 @@
+[build]
+  command   = "npm run build"
+  publish   = ".next"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# All Next.js API routes are handled automatically by Netlify's
+# OpenNext adapter — no separate [[redirects]] needed.

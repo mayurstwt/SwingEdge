@@ -1,0 +1,35 @@
+name: Daily Strategy Run
+
+on:
+  # Runs every weekday at 9:00 PM IST (= 15:30 UTC)
+  schedule:
+    - cron: '30 15 * * 1-5'
+  # Also allows manual trigger from GitHub Actions UI
+  workflow_dispatch:
+
+jobs:
+  run-strategy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Trigger runStrategy API
+        run: |
+          echo "Calling ${{ secrets.NETLIFY_APP_URL }}/api/run-strategy ..."
+          
+          RESPONSE=$(curl -s -o /tmp/response.json -w "%{http_code}" \
+            -X POST "${{ secrets.NETLIFY_APP_URL }}/api/run-strategy" \
+            -H "Content-Type: application/json" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
+            --max-time 60)
+          
+          echo "HTTP Status: $RESPONSE"
+          echo "Response body:"
+          cat /tmp/response.json
+
+          if [ "$RESPONSE" != "200" ]; then
+            echo "Strategy run failed with status $RESPONSE"
+            exit 1
+          fi
+
+          echo "Strategy run completed successfully."
