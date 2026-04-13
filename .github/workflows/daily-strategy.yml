@@ -1,35 +1,37 @@
-name: Daily Strategy Run
+name: High Frequency Strategy Run
 
 on:
-  # Runs every weekday at 9:30, 10:30, 11:30, 12:30, 1:30, 2:30, 3:30 IST
   schedule:
-    - cron: '0 4,5,6,7,8,9,10 * * 1-5'
-  # Also allows manual trigger from GitHub Actions UI
+    # Every 5 minutes (GitHub limit)
+    - cron: '*/5 4-10 * * 1-5'  # 9:30 AM – 3:30 PM IST
   workflow_dispatch:
 
 jobs:
   run-strategy:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
 
     steps:
-      - name: Trigger runStrategy API
+      - name: Run strategy every 3 minutes (loop)
         run: |
-          echo "Calling ${{ secrets.NETLIFY_APP_URL }}/api/run-strategy ..."
-          
-          RESPONSE=$(curl -s -o /tmp/response.json -w "%{http_code}" \
-            -X POST "${{ secrets.NETLIFY_APP_URL }}/api/run-strategy" \
-            -H "Content-Type: application/json" \
-            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
-            --max-time 60)
-          
-          echo "HTTP Status: $RESPONSE"
-          echo "Response body:"
-          cat /tmp/response.json
+          echo "Starting 3-min interval execution..."
 
-          if [ "$RESPONSE" != "200" ]; then
-            echo "Strategy run failed with status $RESPONSE"
-            exit 1
-          fi
+          for i in 1 2; do
+            echo "Run $i at $(date)"
 
-          echo "Strategy run completed successfully."
+            RESPONSE=$(curl -s -o /tmp/response.json -w "%{http_code}" \
+              -X POST "${{ secrets.NETLIFY_APP_URL }}/api/run-strategy" \
+              -H "Content-Type: application/json" \
+              -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
+              --max-time 60)
+
+            echo "HTTP Status: $RESPONSE"
+            cat /tmp/response.json
+
+            if [ "$RESPONSE" != "200" ]; then
+              echo "Run failed"
+            fi
+
+            echo "Sleeping 180 seconds..."
+            sleep 180
+          done
