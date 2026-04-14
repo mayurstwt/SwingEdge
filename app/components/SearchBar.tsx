@@ -22,14 +22,16 @@ export default function SearchBar({ onSelect, isLoading }: SearchBarProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const skipNextOpenRef = useRef(false);
 
-  const fetchResults = useCallback(async (q: string) => {
+  const fetchResults = useCallback(async (q: string, autoOpen: boolean = true) => {
     setIsSearching(true);
     try {
       const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
       const data = await res.json();
       setResults(data);
-      setIsOpen(true);
+      if (autoOpen && q.length > 0 && !skipNextOpenRef.current) setIsOpen(true);
+      skipNextOpenRef.current = false;
       setActiveIndex(-1);
     } catch {
       setResults([]);
@@ -41,7 +43,7 @@ export default function SearchBar({ onSelect, isLoading }: SearchBarProps) {
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (query.length === 0) {
-      fetchResults('');
+      fetchResults('', false);
       return;
     }
     debounceRef.current = setTimeout(() => {
@@ -86,6 +88,7 @@ export default function SearchBar({ onSelect, isLoading }: SearchBarProps) {
   };
 
   const handleSelect = (stock: Stock) => {
+    skipNextOpenRef.current = true;
     setQuery(stock.name);
     setIsOpen(false);
     onSelect(stock);

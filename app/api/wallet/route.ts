@@ -4,14 +4,22 @@ import { calculateCharges } from '@/lib/wallet';
 export async function GET() {
   try {
     const supabase = getSupabase();
-    const [walletRes, tradesRes] = await Promise.all([
+    
+    // Get latest signal date to fetch 'current' prices
+    const { data: latestRun } = await supabase.from('signals').select('run_date').order('run_date', { ascending: false }).limit(1).single();
+    
+    const [walletRes, tradesRes, ledgerRes, signalsRes] = await Promise.all([
       supabase.from('wallet').select('*').eq('id', 1).single(),
       supabase.from('trades').select('*').order('opened_at', { ascending: false }),
+      supabase.from('ledger').select('*').order('created_at', { ascending: false }),
+      latestRun ? supabase.from('signals').select('symbol, price').eq('run_date', latestRun.run_date) : Promise.resolve({ data: [] }),
     ]);
 
     return Response.json({
       balance: walletRes.data?.balance ?? 0,
       trades:  tradesRes.data ?? [],
+      ledger:  ledgerRes.data ?? [],
+      signals: signalsRes.data ?? [],
     });
   } catch (err) {
     return Response.json({ error: 'DB Connection Error' }, { status: 500 });
@@ -32,7 +40,10 @@ export async function POST(req: Request) {
       const { data: wallet } = await supabase.from('wallet').select('balance').eq('id', 1).single();
       const newBalance = (wallet?.balance ?? 0) + amount;
 
-      await supabase.from('wallet').update({ balance: newBalance, updated_at: new Date().toISOString() }).eq('id', 1);
+      await Promise.all([
+        supabase.from('wallet').update({ balance: newBalance, updated_at: new Date().toISOString() }).eq('id', 1),
+        supabase.from('ledger').insert({ type: 'CREDIT', amount, description: 'Cash Deposit' }),
+      ]);
       return Response.json({ success: true, balance: newBalance });
     }
 
@@ -49,7 +60,10 @@ export async function POST(req: Request) {
       }
 
       const newBalance = currentBalance - amount;
-      await supabase.from('wallet').update({ balance: newBalance, updated_at: new Date().toISOString() }).eq('id', 1);
+      await Promise.all([
+        supabase.from('wallet').update({ balance: newBalance, updated_at: new Date().toISOString() }).eq('id', 1),
+        supabase.from('ledger').insert({ type: 'DEBIT', amount, description: 'Cash Withdrawal' }),
+      ]);
       return Response.json({ success: true, balance: newBalance });
     }
 

@@ -2453,3 +2453,52 @@ body {
 }
 
 .skeleton-row.tall { height: 200px; opacity: 0.3; }
+
+/* ── Wallet Summary Grid ── */
+.wallet-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.summary-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  padding: 16px;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: var(--shadow-card);
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.summary-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--border-cyan);
+}
+
+.summary-label {
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.summary-value {
+  font-size: 1.1rem;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+.credit-color { color: var(--accent-green); }
+.debit-color { color: var(--accent-red); }
+
+@media (max-width: 640px) {
+  .wallet-summary-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

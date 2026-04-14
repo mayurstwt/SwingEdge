@@ -12,8 +12,9 @@ export async function GET() {
   try {
     const { data: latestRun } = await supabase
       .from('signals')
-      .select('run_date')
+      .select('run_date, updated_at')
       .order('run_date', { ascending: false })
+      .order('updated_at', { ascending: false })
       .limit(1)
       .single();
 
@@ -32,6 +33,7 @@ export async function GET() {
     return Response.json({ 
       signals: data ?? [], 
       run_date: latestRun.run_date,
+      last_updated_at: latestRun.updated_at,
       fetched_at: today 
     });
   } catch (err: any) {

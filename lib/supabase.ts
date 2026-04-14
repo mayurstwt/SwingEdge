@@ -47,6 +47,14 @@ export interface DailyStatsRow {
   created_at: string;
 }
 
+export interface LedgerRow {
+  id: string;
+  type: 'CREDIT' | 'DEBIT';
+  amount: number;
+  description: string;
+  created_at: string;
+}
+
 export interface WalletRow {
   id: number;
   balance: number;

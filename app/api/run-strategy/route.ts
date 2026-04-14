@@ -113,6 +113,7 @@ if (cronSecret && !isDev) {
           symbol: stockInfo.symbol, short_name: shortName, decision: analysis.decision, score: analysis.score,
           price: currentPrice, stop_loss: analysis.stopLoss, target: analysis.target, rsi: analysis.rsi, reason: analysis.reason,
           trend: analysis.trend, change_pct: analysis.changePercent, run_date: todayStr,
+          updated_at: new Date().toISOString(), // Refresh every run
         }, { onConflict: 'symbol,run_date' });
 
         if (sigErr) throw new Error(`Signal Upsert Failed: ${sigErr.message}`);

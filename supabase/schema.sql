@@ -17,9 +17,10 @@ CREATE TABLE IF NOT EXISTS signals (
   trend       text,
   change_pct  numeric(6, 2),
   reason      text,
-  run_date    date NOT NULL DEFAULT CURRENT_DATE,
-  created_at  timestamptz DEFAULT now()
-);
+    run_date    date NOT NULL DEFAULT CURRENT_DATE,
+    created_at  timestamptz DEFAULT now(),
+    updated_at  timestamptz DEFAULT now()
+ );
 
 CREATE INDEX IF NOT EXISTS signals_run_date_idx ON signals(run_date DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS signals_symbol_run_date_idx ON signals(symbol, run_date);
@@ -62,6 +63,15 @@ CREATE TABLE IF NOT EXISTS daily_stats (
   created_at        timestamptz DEFAULT now()
 );
 
+-- 5. Ledger table (Track deposits/withdrawals)
+CREATE TABLE IF NOT EXISTS ledger (
+  id          uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  type        text NOT NULL CHECK (type IN ('CREDIT', 'DEBIT')),
+  amount      numeric(14, 2) NOT NULL,
+  description text,
+  created_at  timestamptz DEFAULT now()
+);
+
 -- Seed current wallet if missing
 INSERT INTO wallet (id, balance) VALUES (1, 0.00)
 ON CONFLICT (id) DO NOTHING;
@@ -71,8 +81,10 @@ ALTER TABLE signals     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE trades      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE wallet      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE daily_stats ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ledger      ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "anon_full_signals"     ON signals     FOR ALL USING (true);
 CREATE POLICY "anon_full_trades"      ON trades      FOR ALL USING (true);
 CREATE POLICY "anon_full_wallet"      ON wallet      FOR ALL USING (true);
 CREATE POLICY "anon_full_daily_stats" ON daily_stats FOR ALL USING (true);
+CREATE POLICY "anon_full_ledger"      ON ledger      FOR ALL USING (true);

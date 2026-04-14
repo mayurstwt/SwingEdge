@@ -1,11 +1,13 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import type { TradeRow } from '@/lib/supabase';
+import type { TradeRow, LedgerRow } from '@/lib/supabase';
 
 export default function WalletPanel() {
   const [balance, setBalance] = useState<number | null>(null);
   const [trades, setTrades] = useState<TradeRow[]>([]);
+  const [ledger, setLedger] = useState<LedgerRow[]>([]);
+  const [signals, setSignals] = useState<{ symbol: string; price: number }[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'open' | 'closed'>('open');
 
@@ -25,6 +27,8 @@ export default function WalletPanel() {
       const data = await res.json();
       setBalance(data.balance ?? 0);
       setTrades(data.trades ?? []);
+      setLedger(data.ledger ?? []);
+      setSignals(data.signals ?? []);
     } catch {
       setError('Unable to fetch wallet data.');
     } finally {
@@ -112,15 +116,77 @@ export default function WalletPanel() {
 
   const openTrades = trades.filter(t => t.status === 'OPEN');
   const closedTrades = trades.filter(t => t.status === 'CLOSED');
-  const totalPnL = closedTrades.reduce((sum, t) => sum + (t.profit_loss ?? 0), 0);
+
+  // Metrics
+  const realizedPnL = closedTrades.reduce((sum, t) => sum + (t.profit_loss ?? 0), 0);
+  
+  const unrealizedPnL = openTrades.reduce((sum, t) => {
+    const signal = signals.find(s => s.symbol === t.symbol);
+    if (!signal) return sum;
+    const currentVal = signal.price * t.quantity;
+    const buyVal = t.buy_price * t.quantity;
+    return sum + (currentVal - buyVal);
+  }, 0);
+
+  const totalPnL = realizedPnL + unrealizedPnL;
   const totalCharges = trades.reduce((sum, t) => sum + (t.charges ?? 0), 0);
+
+  const todayStr = new Date().toISOString().split('T')[0];
+  const dayPnL = closedTrades
+    .filter(t => t.closed_at && t.closed_at.startsWith(todayStr))
+    .reduce((sum, t) => sum + (t.profit_loss ?? 0), 0) + 
+    // Add today's movement on open positions (approximate since we don't have prev close here, but let's stick to total unrealized for simplicity)
+    0; 
+
+  const totalDeposited = ledger
+    .filter(l => l.type === 'CREDIT')
+    .reduce((sum, l) => sum + Number(l.amount), 0);
+
+  const totalWithdrawal = ledger
+    .filter(l => l.type === 'DEBIT')
+    .reduce((sum, l) => sum + Number(l.amount), 0);
+
+  const totalBuy = trades.reduce((sum, t) => sum + (t.buy_price * t.quantity), 0);
+  const totalSold = closedTrades.reduce((sum, t) => sum + ((t.sell_price || 0) * t.quantity), 0);
 
   if (isLoading) return <div className="wallet-panel"><div className="skeleton-row tall" /></div>;
 
   return (
     <div className="wallet-panel" id="wallet-panel">
+      {/* ── Summary Cards ── */}
+      <div className="wallet-summary-grid">
+        <div className="summary-card">
+          <span className="summary-label">Total P&L</span>
+          <span className={`summary-value ${totalPnL >= 0 ? 'buy-color' : 'avoid-color'}`}>
+            {totalPnL >= 0 ? '+' : ''}{fmt(totalPnL)}
+          </span>
+        </div>
+        <div className="summary-card">
+          <span className="summary-label">Day P&L</span>
+          <span className={`summary-value ${dayPnL >= 0 ? 'buy-color' : 'avoid-color'}`}>
+            {dayPnL >= 0 ? '+' : ''}{fmt(dayPnL)}
+          </span>
+        </div>
+        <div className="summary-card">
+          <span className="summary-label">Deposited</span>
+          <span className="summary-value credit-color">{fmt(totalDeposited)}</span>
+        </div>
+        <div className="summary-card">
+          <span className="summary-label">Withdrawn</span>
+          <span className="summary-value debit-color">{fmt(totalWithdrawal)}</span>
+        </div>
+        <div className="summary-card">
+          <span className="summary-label">Total Buy</span>
+          <span className="summary-value" style={{ color: 'var(--color-buy)' }}>{fmt(totalBuy)}</span>
+        </div>
+        <div className="summary-card">
+          <span className="summary-label">Total Sold</span>
+          <span className="summary-value" style={{ color: 'var(--color-avoid)' }}>{fmt(totalSold)}</span>
+        </div>
+      </div>
+
       {/* ── Balance Strip ── */}
-      <div className="wallet-balance-strip">
+      <div className="wallet-balance-strip mt-4">
         <div className="balance-block">
           <span className="balance-label">Cash Balance</span>
           <span className="balance-value">{balance !== null ? fmt(balance) : '—'}</span>

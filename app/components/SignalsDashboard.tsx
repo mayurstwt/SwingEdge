@@ -24,7 +24,7 @@ export default function SignalsDashboard({ onSelectStock }: SignalsDashboardProp
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'Failed to load signals');
       setSignals(data.signals ?? []);
-      setRunDate(data.run_date ?? null);
+      setRunDate(data.last_updated_at ?? data.run_date ?? null);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -69,7 +69,10 @@ export default function SignalsDashboard({ onSelectStock }: SignalsDashboardProp
 
   const formatDate = (d: string | null) => {
     if (!d) return '—';
-    return new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+    const date = new Date(d);
+    const dateStr = date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+    const timeStr = date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+    return `${dateStr} @ ${timeStr}`;
   };
 
   return (
