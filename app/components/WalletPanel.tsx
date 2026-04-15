@@ -39,10 +39,7 @@ export default function WalletPanel() {
   useEffect(() => {
   fetchWallet();
 
-  const interval = setInterval(() => {
-    fetchWallet(); // refresh every 30 sec
-  }, 30000);
-
+  const interval = setInterval(fetchWallet, 30000);
   return () => clearInterval(interval);
 }, [fetchWallet]);
 
