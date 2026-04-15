@@ -36,7 +36,15 @@ export default function WalletPanel() {
     }
   }, []);
 
-  useEffect(() => { fetchWallet(); }, [fetchWallet]);
+  useEffect(() => {
+  fetchWallet();
+
+  const interval = setInterval(() => {
+    fetchWallet(); // refresh every 30 sec
+  }, 30000);
+
+  return () => clearInterval(interval);
+}, [fetchWallet]);
 
   const handleDeposit = async () => {
     const val = parseFloat(depositAmount);
