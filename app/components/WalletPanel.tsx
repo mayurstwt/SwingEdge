@@ -128,13 +128,16 @@ export default function WalletPanel() {
   // Metrics
   const realizedPnL = closedTrades.reduce((sum, t) => sum + (t.profit_loss ?? 0), 0);
   
-  const unrealizedPnL = openTrades.reduce((sum, t) => {
-    const signal = signals.find(s => s.symbol === t.symbol);
-    if (!signal) return sum;
-    const currentVal = signal.price * t.quantity;
-    const buyVal = t.buy_price * t.quantity;
-    return sum + (currentVal - buyVal);
-  }, 0);
+  // Create fast lookup map
+const signalMap = new Map(signals.map(s => [s.symbol.trim(), s.price]));
+
+const unrealizedPnL = openTrades.reduce((sum, t) => {
+  const currentPrice = signalMap.get(t.symbol.trim());
+
+  if (!currentPrice) return sum;
+
+  return sum + ((currentPrice - t.buy_price) * t.quantity);
+}, 0);
 
   const totalPnL = realizedPnL + unrealizedPnL;
   const totalCharges = trades.reduce((sum, t) => sum + (t.charges ?? 0), 0);
