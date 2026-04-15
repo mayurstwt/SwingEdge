@@ -53,6 +53,7 @@ export default function SignalsDashboard({ onSelectStock }: SignalsDashboardProp
       }
 
       await fetchSignals();
+      await fetch('/api/wallet');
     } catch (err: any) {
       setError(err.message);
     } finally {
