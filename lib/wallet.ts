@@ -30,10 +30,27 @@ export async function executeAutoBuy(
   const { data: wallet } = await supabase.from('wallet').select('balance').eq('id', 1).single();
   const balance = wallet?.balance ?? 0;
   
-  const maxSpend = Math.min(budget, balance);
-  const quantity = Math.floor(maxSpend / price);
-  if (quantity <= 0) return { success: false, reason: 'Budget too low' };
+  // 🔥 Step 1: Define risk per trade (1% of capital)
+const RISK_PERCENT = 0.01;
+const riskAmount = balance * RISK_PERCENT;
 
+// 🔥 Step 2: Risk per share
+const riskPerShare = Math.abs(price - stopLoss);
+
+if (riskPerShare <= 0) {
+  return { success: false, reason: 'Invalid SL distance' };
+}
+
+// 🔥 Step 3: Position sizing based on risk
+let quantity = Math.floor(riskAmount / riskPerShare);
+
+// Safety cap (optional but recommended)
+const maxAffordableQty = Math.floor(balance / price);
+quantity = Math.min(quantity, maxAffordableQty);
+
+if (quantity <= 0) {
+  return { success: false, reason: 'Position size too small' };
+}
   const tradeValue = price * quantity;
   const charges = calculateCharges(tradeValue, 'buy');
   const totalCost = tradeValue + charges;
