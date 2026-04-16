@@ -17,7 +17,7 @@ async function fetchAndAnalyze(symbol: string, name: string) {
   const timestamps: number[] = result.timestamp ?? [];
 
   const rows = timestamps
-    .map((ts, i) => ({
+    .map((_, i) => ({
       close: quote.close?.[i],
       open: quote.open?.[i],
       high: quote.high?.[i],
@@ -28,7 +28,7 @@ async function fetchAndAnalyze(symbol: string, name: string) {
       r.close != null && r.open != null && r.high != null && r.low != null && r.volume != null
     );
 
-  if (rows.length < 30) throw new Error(`Not enough history (${rows.length} days)`);
+  if (rows.length < 30) throw new Error(`Not enough history`);
 
   const analysis = analyzeStock(
     rows.map(r => r.close),
@@ -37,30 +37,16 @@ async function fetchAndAnalyze(symbol: string, name: string) {
     rows.map(r => r.volume)
   );
 
-  const lastDay = rows[rows.length - 1];
-
   return {
     analysis,
-    currentPrice: lastDay.close,
+    currentPrice: rows[rows.length - 1].close,
     shortName: result.meta?.shortName ?? name
   };
 }
 
 export async function POST(req: Request) {
-  const cronSecret = process.env.CRON_SECRET;
-  const isDev = process.env.NODE_ENV === 'development';
-
-  if (cronSecret && !isDev) {
-    const incoming = req.headers.get('x-cron-secret');
-    if (incoming && incoming !== cronSecret) {
-      return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-  }
-
-  const now = new Date();
-  const todayStr = now.toISOString().split('T')[0];
-
   const supabase = getSupabase();
+  const todayStr = new Date().toISOString().split('T')[0];
 
   const results = {
     processed: 0,
@@ -72,12 +58,10 @@ export async function POST(req: Request) {
   try {
     const [
       { data: wallet },
-      { data: openTrades },
-      { data: todayStats }
+      { data: openTrades }
     ] = await Promise.all([
       supabase.from('wallet').select('balance').eq('id', 1).single(),
-      supabase.from('trades').select('*').eq('status', 'OPEN'),
-      supabase.from('daily_stats').select('*').eq('run_date', todayStr).single()
+      supabase.from('trades').select('*').eq('status', 'OPEN')
     ]);
 
     const currentBalance = wallet?.balance ?? 0;
@@ -94,23 +78,12 @@ export async function POST(req: Request) {
     const openTradesCount = openTrades?.length || 0;
     const capitalUsagePct = currentEquity / (totalValue || 1);
 
-    let circuitBroken = todayStats?.is_circuit_broken ?? false;
-
     // 🔥 MARKET FILTER
     let marketBullish = true;
     try {
       const nifty = await fetchAndAnalyze('^NSEI', 'NIFTY 50');
-
-      marketBullish =
-        nifty.analysis.trend === 'UPTREND' &&
-        nifty.analysis.rsi > 50;
-
-      if (!marketBullish) {
-        results.logs.push(`Market Weak: Skipping new buys`);
-      }
-    } catch (err: any) {
-      results.logs.push(`Market Data Error: ${err.message}`);
-    }
+      marketBullish = nifty.analysis.trend === 'UPTREND' && nifty.analysis.rsi > 50;
+    } catch {}
 
     for (const stockInfo of PRIORITY_STOCKS) {
       try {
@@ -140,12 +113,7 @@ export async function POST(req: Request) {
         if (existingTrade) {
           let sellReason = '';
 
-          const ageDays =
-            (new Date(todayStr).getTime() -
-              new Date(existingTrade.opened_at).getTime()) /
-            (1000 * 3600 * 24);
-
-          // 🔥 Trailing SL
+          // ✅ 1. TRAILING SL (always run)
           if (existingTrade.stop_loss) {
             const atr =
               analysis?.atr ||
@@ -162,8 +130,8 @@ export async function POST(req: Request) {
             }
           }
 
-          // 🔥 PARTIAL PROFIT BOOKING
-          else if (currentPrice >= (existingTrade.target || 0)) {
+          // ✅ 2. PARTIAL PROFIT BOOKING (independent)
+          if (existingTrade.target && currentPrice >= existingTrade.target) {
             const halfQty = Math.floor(existingTrade.quantity / 2);
 
             if (halfQty > 0) {
@@ -181,28 +149,28 @@ export async function POST(req: Request) {
                 })
                 .eq('id', existingTrade.id);
 
-              results.logs.push(`${existingTrade.symbol} Partial Profit Booked`);
+              results.logs.push(`${existingTrade.symbol} Partial Booked`);
+              continue; // ⚠️ skip further checks
             } else {
               sellReason = 'Final Target Hit';
             }
           }
 
-          else if (analysis.decision === 'AVOID')
+          // ✅ 3. EXIT CONDITIONS
+          if (analysis.decision === 'AVOID')
             sellReason = 'Signal flip';
           else if (currentPrice <= existingTrade.stop_loss)
             sellReason = 'Stop loss hit';
-          else if (ageDays > 15)
-            sellReason = 'Time stop';
 
           if (sellReason) {
             await executeAutoSell(existingTrade, currentPrice, sellReason);
             results.auto_sells.push(stockInfo.symbol);
           }
+
         } else {
           const volumeOk = analysis.volumeRatio > 1.5;
 
           if (
-            !circuitBroken &&
             marketBullish &&
             analysis.decision === 'BUY' &&
             analysis.score >= 70 &&
@@ -221,15 +189,6 @@ export async function POST(req: Request) {
             );
 
             if (res.success) results.auto_buys.push(stockInfo.symbol);
-          } else {
-            if (!marketBullish)
-              results.logs.push(`${stockInfo.symbol} Skipped: Market Weak`);
-            if (!volumeOk)
-              results.logs.push(`${stockInfo.symbol} Skipped: Low Volume`);
-            if (openTradesCount >= MAX_OPEN_TRADES)
-              results.logs.push(`${stockInfo.symbol} Skipped: Max Trades`);
-            if (capitalUsagePct >= MAX_CAPITAL_USAGE)
-              results.logs.push(`${stockInfo.symbol} Skipped: Capital Limit`);
           }
         }
 
@@ -238,6 +197,7 @@ export async function POST(req: Request) {
         results.logs.push(`${stockInfo.symbol}: ${err.message}`);
       }
     }
+
   } catch (err: any) {
     return Response.json({ error: err.message }, { status: 500 });
   }
