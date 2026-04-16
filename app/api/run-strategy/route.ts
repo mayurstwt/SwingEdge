@@ -88,7 +88,6 @@ export async function POST(req: Request) {
 
     const totalValue = currentBalance + currentEquity;
 
-    // 🔥 Portfolio controls
     const MAX_OPEN_TRADES = 5;
     const MAX_CAPITAL_USAGE = 0.7;
 
@@ -97,7 +96,7 @@ export async function POST(req: Request) {
 
     let circuitBroken = todayStats?.is_circuit_broken ?? false;
 
-    // 🔥 MARKET FILTER (NIFTY)
+    // 🔥 MARKET FILTER
     let marketBullish = true;
     try {
       const nifty = await fetchAndAnalyze('^NSEI', 'NIFTY 50');
@@ -163,12 +162,35 @@ export async function POST(req: Request) {
             }
           }
 
-          if (analysis.decision === 'AVOID')
+          // 🔥 PARTIAL PROFIT BOOKING
+          else if (currentPrice >= (existingTrade.target || 0)) {
+            const halfQty = Math.floor(existingTrade.quantity / 2);
+
+            if (halfQty > 0) {
+              await executeAutoSell(
+                { ...existingTrade, quantity: halfQty },
+                currentPrice,
+                'Partial Profit Booking'
+              );
+
+              await supabase
+                .from('trades')
+                .update({
+                  quantity: existingTrade.quantity - halfQty,
+                  target: null
+                })
+                .eq('id', existingTrade.id);
+
+              results.logs.push(`${existingTrade.symbol} Partial Profit Booked`);
+            } else {
+              sellReason = 'Final Target Hit';
+            }
+          }
+
+          else if (analysis.decision === 'AVOID')
             sellReason = 'Signal flip';
           else if (currentPrice <= existingTrade.stop_loss)
             sellReason = 'Stop loss hit';
-          else if (currentPrice >= existingTrade.target)
-            sellReason = 'Target hit';
           else if (ageDays > 15)
             sellReason = 'Time stop';
 
@@ -181,7 +203,7 @@ export async function POST(req: Request) {
 
           if (
             !circuitBroken &&
-            marketBullish && // ✅ NEW FILTER
+            marketBullish &&
             analysis.decision === 'BUY' &&
             analysis.score >= 70 &&
             volumeOk &&
