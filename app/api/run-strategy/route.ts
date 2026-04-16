@@ -133,8 +133,7 @@ if (existingTrade.stop_loss) {
   const ATR_MULTIPLIER = 1.5;
 
   // We approximate ATR using difference between price & stopLoss
-  const approxATR = Math.abs(currentPrice - existingTrade.stop_loss);
-
+  const atr = analysis?.atr || 5;
   const newTrailingSL = currentPrice - (approxATR * ATR_MULTIPLIER);
 
   // Only move SL upwards (never down)
