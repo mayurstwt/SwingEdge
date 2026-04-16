@@ -37,17 +37,10 @@ async function fetchAndAnalyze(symbol: string, name: string) {
     rows.map(r => r.volume)
   );
 
-  const last20 = rows.slice(-20);
-  const avgDailyValue = last20.reduce((sum, r) => sum + (r.close * r.volume), 0) / 20;
-
   const lastDay = rows[rows.length - 1];
-  const prevDay = rows[rows.length - 2];
-  const gapPct = ((lastDay.open - prevDay.close) / prevDay.close) * 100;
 
   return {
     analysis,
-    avgDailyValue,
-    gapPct,
     currentPrice: lastDay.close,
     shortName: result.meta?.shortName ?? name
   };
@@ -66,8 +59,6 @@ export async function POST(req: Request) {
 
   const now = new Date();
   const todayStr = now.toISOString().split('T')[0];
-
-  console.log(`[StrategyRun] Starting for ${todayStr}`);
 
   const supabase = getSupabase();
 
@@ -105,6 +96,22 @@ export async function POST(req: Request) {
     const capitalUsagePct = currentEquity / (totalValue || 1);
 
     let circuitBroken = todayStats?.is_circuit_broken ?? false;
+
+    // 🔥 MARKET FILTER (NIFTY)
+    let marketBullish = true;
+    try {
+      const nifty = await fetchAndAnalyze('^NSEI', 'NIFTY 50');
+
+      marketBullish =
+        nifty.analysis.trend === 'UPTREND' &&
+        nifty.analysis.rsi > 50;
+
+      if (!marketBullish) {
+        results.logs.push(`Market Weak: Skipping new buys`);
+      }
+    } catch (err: any) {
+      results.logs.push(`Market Data Error: ${err.message}`);
+    }
 
     for (const stockInfo of PRIORITY_STOCKS) {
       try {
@@ -174,6 +181,7 @@ export async function POST(req: Request) {
 
           if (
             !circuitBroken &&
+            marketBullish && // ✅ NEW FILTER
             analysis.decision === 'BUY' &&
             analysis.score >= 70 &&
             volumeOk &&
@@ -192,6 +200,8 @@ export async function POST(req: Request) {
 
             if (res.success) results.auto_buys.push(stockInfo.symbol);
           } else {
+            if (!marketBullish)
+              results.logs.push(`${stockInfo.symbol} Skipped: Market Weak`);
             if (!volumeOk)
               results.logs.push(`${stockInfo.symbol} Skipped: Low Volume`);
             if (openTradesCount >= MAX_OPEN_TRADES)
