@@ -85,6 +85,34 @@ export async function POST(req: Request) {
       marketBullish = nifty.analysis.trend === 'UPTREND' && nifty.analysis.rsi > 50;
     } catch {}
 
+    // 🔥 STRATEGY OPTIMIZATION ENGINE
+    let badEntryTypes: string[] = [];
+    let goodEntryTypes: string[] = [];
+
+    try {
+      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || '';
+      const res = await fetch(`${baseUrl}/api/analytics`);
+      const analytics = await res.json();
+
+      if (analytics.entryTypeStats) {
+        analytics.entryTypeStats.forEach((e: any) => {
+          const winRate = Number(e.winRate);
+          const profit = Number(e.profit);
+
+          if (winRate < 40 && profit < 0) {
+            badEntryTypes.push(e.type);
+          }
+
+          if (winRate > 55) {
+            goodEntryTypes.push(e.type);
+          }
+        });
+      }
+
+    } catch (err) {
+      results.logs.push('Analytics fetch failed');
+    }
+
     for (const stockInfo of PRIORITY_STOCKS) {
       try {
         const { analysis, currentPrice, shortName } =
@@ -110,10 +138,18 @@ export async function POST(req: Request) {
           (t: any) => t.symbol === stockInfo.symbol
         );
 
+        // 🔥 ENTRY TYPE DETECTION
+        const entryType =
+          analysis.reason?.toLowerCase().includes('breakout')
+            ? 'BREAKOUT'
+            : analysis.reason?.toLowerCase().includes('pullback')
+            ? 'PULLBACK'
+            : 'MOMENTUM';
+
         if (existingTrade) {
           let sellReason = '';
 
-          // ✅ 1. TRAILING SL (always run)
+          // TRAILING SL
           if (existingTrade.stop_loss) {
             const atr =
               analysis?.atr ||
@@ -130,7 +166,7 @@ export async function POST(req: Request) {
             }
           }
 
-          // ✅ 2. PARTIAL PROFIT BOOKING (independent)
+          // PARTIAL BOOKING
           if (existingTrade.target && currentPrice >= existingTrade.target) {
             const halfQty = Math.floor(existingTrade.quantity / 2);
 
@@ -150,13 +186,13 @@ export async function POST(req: Request) {
                 .eq('id', existingTrade.id);
 
               results.logs.push(`${existingTrade.symbol} Partial Booked`);
-              continue; // ⚠️ skip further checks
+              continue;
             } else {
               sellReason = 'Final Target Hit';
             }
           }
 
-          // ✅ 3. EXIT CONDITIONS
+          // EXIT CONDITIONS
           if (analysis.decision === 'AVOID')
             sellReason = 'Signal flip';
           else if (currentPrice <= existingTrade.stop_loss)
@@ -173,7 +209,8 @@ export async function POST(req: Request) {
           if (
             marketBullish &&
             analysis.decision === 'BUY' &&
-            analysis.score >= 70 &&
+            !badEntryTypes.includes(entryType) &&
+            analysis.score >= (goodEntryTypes.includes(entryType) ? 65 : 70) &&
             volumeOk &&
             openTradesCount < MAX_OPEN_TRADES &&
             capitalUsagePct < MAX_CAPITAL_USAGE
@@ -188,7 +225,13 @@ export async function POST(req: Request) {
               stockInfo.sector
             );
 
-            if (res.success) results.auto_buys.push(stockInfo.symbol);
+            if (res.success) {
+              results.auto_buys.push(stockInfo.symbol);
+            }
+          } else {
+            if (badEntryTypes.includes(entryType)) {
+              results.logs.push(`${stockInfo.symbol} Skipped: Bad Strategy (${entryType})`);
+            }
           }
         }
 
