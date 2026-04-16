@@ -128,6 +128,26 @@ if (cronSecret && !isDev) {
           else if (currentPrice >= (existingTrade.target || 999999)) sellReason = "Profit Target reached";
           else if (ageDays > 15) sellReason = "Time-Stop triggered";
 
+// 🔥 TRAILING STOP LOSS UPDATE
+if (existingTrade.stop_loss) {
+  const ATR_MULTIPLIER = 1.5;
+
+  // We approximate ATR using difference between price & stopLoss
+  const approxATR = Math.abs(currentPrice - existingTrade.stop_loss);
+
+  const newTrailingSL = currentPrice - (approxATR * ATR_MULTIPLIER);
+
+  // Only move SL upwards (never down)
+  if (newTrailingSL > existingTrade.stop_loss) {
+    await supabase
+      .from('trades')
+      .update({ stop_loss: Number(newTrailingSL.toFixed(2)) })
+      .eq('id', existingTrade.id);
+
+    console.log(`[Trailing SL] ${existingTrade.symbol} moved to ₹${newTrailingSL}`);
+  }
+}
+
           if (sellReason) {
             await executeAutoSell(existingTrade, currentPrice, sellReason);
             results.auto_sells.push(`${stockInfo.symbol}`);
