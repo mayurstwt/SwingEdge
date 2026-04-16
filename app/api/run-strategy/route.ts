@@ -9,6 +9,7 @@ const PRIORITY_STOCKS = STOCKS_DATA.slice(0, 20);
 async function fetchAndAnalyze(symbol: string, name: string) {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1y&interval=1d`;
   const res = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 15000 });
+
   const result = res.data?.chart?.result?.[0];
   if (!result) throw new Error('No data from Yahoo');
 
@@ -16,159 +17,198 @@ async function fetchAndAnalyze(symbol: string, name: string) {
   const timestamps: number[] = result.timestamp ?? [];
 
   const rows = timestamps
-    .map((ts: number, i: number) => ({
-      close: (quote.close ?? [])[i] as number | null,
-      open:  (quote.open ?? [])[i] as number | null,
-      high:  (quote.high ?? [])[i] as number | null,
-      low:   (quote.low ?? [])[i] as number | null,
-      volume:(quote.volume ?? [])[i] as number | null,
+    .map((ts, i) => ({
+      close: quote.close?.[i],
+      open: quote.open?.[i],
+      high: quote.high?.[i],
+      low: quote.low?.[i],
+      volume: quote.volume?.[i],
     }))
-    .filter((r: any): r is { close: number; open: number; high: number; low: number; volume: number } => 
-      r.close !== null && r.open !== null && r.high !== null && r.low !== null && r.volume !== null
+    .filter((r): r is { close: number; open: number; high: number; low: number; volume: number } =>
+      r.close != null && r.open != null && r.high != null && r.low != null && r.volume != null
     );
 
   if (rows.length < 30) throw new Error(`Not enough history (${rows.length} days)`);
 
   const analysis = analyzeStock(
-    rows.map((r: any) => r.close),
-    rows.map((r: any) => r.high),
-    rows.map((r: any) => r.low),
-    rows.map((r: any) => r.volume)
+    rows.map(r => r.close),
+    rows.map(r => r.high),
+    rows.map(r => r.low),
+    rows.map(r => r.volume)
   );
 
   const last20 = rows.slice(-20);
-  const avgDailyValue = last20.reduce((sum: number, r: any) => sum + (r.close * r.volume), 0) / 20;
+  const avgDailyValue = last20.reduce((sum, r) => sum + (r.close * r.volume), 0) / 20;
 
   const lastDay = rows[rows.length - 1];
   const prevDay = rows[rows.length - 2];
   const gapPct = ((lastDay.open - prevDay.close) / prevDay.close) * 100;
 
-  return { analysis, avgDailyValue, gapPct, currentPrice: lastDay.close, shortName: result.meta?.shortName ?? name };
+  return {
+    analysis,
+    avgDailyValue,
+    gapPct,
+    currentPrice: lastDay.close,
+    shortName: result.meta?.shortName ?? name
+  };
 }
 
 export async function POST(req: Request) {
-const cronSecret = process.env.CRON_SECRET;
-const isDev = process.env.NODE_ENV === 'development';
+  const cronSecret = process.env.CRON_SECRET;
+  const isDev = process.env.NODE_ENV === 'development';
 
-// ✅ Allow UI trigger (no header)
-// Only enforce secret if header is explicitly sent (cron job)
-if (cronSecret && !isDev) {
-  const incoming = req.headers.get('x-cron-secret');
-
-  // If request has header → validate (cron)
-  if (incoming && incoming !== cronSecret) {
-    return Response.json({ error: 'Unauthorized (Invalid Cron Secret)' }, { status: 401 });
+  if (cronSecret && !isDev) {
+    const incoming = req.headers.get('x-cron-secret');
+    if (incoming && incoming !== cronSecret) {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    }
   }
-}
 
-  // Use a stable date format (YYYY-MM-DD)
   const now = new Date();
   const todayStr = now.toISOString().split('T')[0];
-  
-  console.log(`[StrategyRun] Starting for ${todayStr}. Total stocks: ${PRIORITY_STOCKS.length}`);
+
+  console.log(`[StrategyRun] Starting for ${todayStr}`);
 
   const supabase = getSupabase();
-  const results = { processed: 0, auto_buys: [] as string[], auto_sells: [] as string[], logs: [] as string[] };
+
+  const results = {
+    processed: 0,
+    auto_buys: [] as string[],
+    auto_sells: [] as string[],
+    logs: [] as string[]
+  };
 
   try {
-    // 1. Fetch Wallet & Open Trades & Daily Stats
     const [
-      { data: wallet, error: wErr },
-      { data: openTrades, error: tErr },
-      { data: todayStats, error: tsErr }
+      { data: wallet },
+      { data: openTrades },
+      { data: todayStats }
     ] = await Promise.all([
       supabase.from('wallet').select('balance').eq('id', 1).single(),
       supabase.from('trades').select('*').eq('status', 'OPEN'),
       supabase.from('daily_stats').select('*').eq('run_date', todayStr).single()
     ]);
 
-    if (wErr || tErr) throw new Error(`DB Connect Error: ${wErr?.message || tErr?.message}`);
-
     const currentBalance = wallet?.balance ?? 0;
-    const currentEquity = (openTrades ?? []).reduce((sum: number, t: any) => sum + (Number(t.buy_price) * t.quantity), 0);
+    const currentEquity = (openTrades ?? []).reduce(
+      (sum, t: any) => sum + (t.buy_price * t.quantity),
+      0
+    );
+
     const totalValue = currentBalance + currentEquity;
 
-    // Initialize Daily Stats if missing
+    // 🔥 Portfolio controls
+    const MAX_OPEN_TRADES = 5;
+    const MAX_CAPITAL_USAGE = 0.7;
+
+    const openTradesCount = openTrades?.length || 0;
+    const capitalUsagePct = currentEquity / (totalValue || 1);
+
     let circuitBroken = todayStats?.is_circuit_broken ?? false;
-    if (!todayStats) {
-      await supabase.from('daily_stats').insert({
-        run_date: todayStr,
-        starting_balance: currentBalance,
-        starting_equity: currentEquity,
-      });
-      console.log(`[StrategyRun] Initialized daily_stats for ${todayStr}`);
-    } else {
-      const startingTotal = Number(todayStats.starting_balance) + Number(todayStats.starting_equity);
-      if (totalValue < startingTotal * 0.95) {
-        circuitBroken = true;
-        await supabase.from('daily_stats').update({ is_circuit_broken: true }).eq('run_date', todayStr);
-      }
-    }
 
     for (const stockInfo of PRIORITY_STOCKS) {
       try {
-        const { analysis, avgDailyValue, gapPct, currentPrice, shortName } = await fetchAndAnalyze(stockInfo.symbol, stockInfo.name);
+        const { analysis, currentPrice, shortName } =
+          await fetchAndAnalyze(stockInfo.symbol, stockInfo.name);
 
-        const { error: sigErr } = await supabase.from('signals').upsert({
-          symbol: stockInfo.symbol, short_name: shortName, decision: analysis.decision, score: analysis.score,
-          price: currentPrice, stop_loss: analysis.stopLoss, target: analysis.target, rsi: analysis.rsi, reason: analysis.reason,
-          trend: analysis.trend, change_pct: analysis.changePercent, run_date: todayStr,
-          updated_at: new Date().toISOString(), // Refresh every run
+        await supabase.from('signals').upsert({
+          symbol: stockInfo.symbol,
+          short_name: shortName,
+          decision: analysis.decision,
+          score: analysis.score,
+          price: currentPrice,
+          stop_loss: analysis.stopLoss,
+          target: analysis.target,
+          rsi: analysis.rsi,
+          reason: analysis.reason,
+          trend: analysis.trend,
+          change_pct: analysis.changePercent,
+          run_date: todayStr,
+          updated_at: new Date().toISOString()
         }, { onConflict: 'symbol,run_date' });
 
-        if (sigErr) throw new Error(`Signal Upsert Failed: ${sigErr.message}`);
+        const existingTrade = openTrades?.find(
+          (t: any) => t.symbol === stockInfo.symbol
+        );
 
-        // Automated Logic
-        const existingTrade = openTrades?.find((t: any) => t.symbol === stockInfo.symbol);
         if (existingTrade) {
-          let sellReason = "";
-          const ageDays = (new Date(todayStr).getTime() - new Date(existingTrade.opened_at).getTime()) / (1000 * 3600 * 24);
-          if (analysis.decision === 'AVOID') sellReason = `Signal flip: ${analysis.reason}`;
-          else if (currentPrice <= (existingTrade.stop_loss || 0)) sellReason = "Hard Stop Loss triggered";
-          else if (currentPrice >= (existingTrade.target || 999999)) sellReason = "Profit Target reached";
-          else if (ageDays > 15) sellReason = "Time-Stop triggered";
+          let sellReason = '';
 
-// 🔥 TRAILING STOP LOSS UPDATE
-if (existingTrade.stop_loss) {
-  const ATR_MULTIPLIER = 1.5;
+          const ageDays =
+            (new Date(todayStr).getTime() -
+              new Date(existingTrade.opened_at).getTime()) /
+            (1000 * 3600 * 24);
 
-  // We approximate ATR using difference between price & stopLoss
-  const atr = analysis?.atr || 5;
-  const newTrailingSL = currentPrice - (approxATR * ATR_MULTIPLIER);
+          // 🔥 Trailing SL
+          if (existingTrade.stop_loss) {
+            const atr =
+              analysis?.atr ||
+              Math.abs(currentPrice - existingTrade.stop_loss) ||
+              5;
 
-  // Only move SL upwards (never down)
-  if (newTrailingSL > existingTrade.stop_loss) {
-    await supabase
-      .from('trades')
-      .update({ stop_loss: Number(newTrailingSL.toFixed(2)) })
-      .eq('id', existingTrade.id);
+            const newSL = currentPrice - atr * 1.5;
 
-    console.log(`[Trailing SL] ${existingTrade.symbol} moved to ₹${newTrailingSL}`);
-  }
-}
+            if (newSL > existingTrade.stop_loss) {
+              await supabase
+                .from('trades')
+                .update({ stop_loss: Number(newSL.toFixed(2)) })
+                .eq('id', existingTrade.id);
+            }
+          }
+
+          if (analysis.decision === 'AVOID')
+            sellReason = 'Signal flip';
+          else if (currentPrice <= existingTrade.stop_loss)
+            sellReason = 'Stop loss hit';
+          else if (currentPrice >= existingTrade.target)
+            sellReason = 'Target hit';
+          else if (ageDays > 15)
+            sellReason = 'Time stop';
 
           if (sellReason) {
             await executeAutoSell(existingTrade, currentPrice, sellReason);
-            results.auto_sells.push(`${stockInfo.symbol}`);
+            results.auto_sells.push(stockInfo.symbol);
           }
-        } 
-        else if (!circuitBroken && analysis.decision === 'BUY' && analysis.score >= 70) {
-          const res = await executeAutoBuy(stockInfo.symbol, shortName, currentPrice, analysis.stopLoss, analysis.target, analysis.reason, stockInfo.sector);
-          if (res.success) results.auto_buys.push(stockInfo.symbol);
-          else results.logs.push(`${stockInfo.symbol} BUY Skipped: ${res.reason}`);
+        } else {
+          const volumeOk = analysis.volumeRatio > 1.5;
+
+          if (
+            !circuitBroken &&
+            analysis.decision === 'BUY' &&
+            analysis.score >= 70 &&
+            volumeOk &&
+            openTradesCount < MAX_OPEN_TRADES &&
+            capitalUsagePct < MAX_CAPITAL_USAGE
+          ) {
+            const res = await executeAutoBuy(
+              stockInfo.symbol,
+              shortName,
+              currentPrice,
+              analysis.stopLoss,
+              analysis.target,
+              analysis.reason,
+              stockInfo.sector
+            );
+
+            if (res.success) results.auto_buys.push(stockInfo.symbol);
+          } else {
+            if (!volumeOk)
+              results.logs.push(`${stockInfo.symbol} Skipped: Low Volume`);
+            if (openTradesCount >= MAX_OPEN_TRADES)
+              results.logs.push(`${stockInfo.symbol} Skipped: Max Trades`);
+            if (capitalUsagePct >= MAX_CAPITAL_USAGE)
+              results.logs.push(`${stockInfo.symbol} Skipped: Capital Limit`);
+          }
         }
 
         results.processed++;
       } catch (err: any) {
         results.logs.push(`${stockInfo.symbol}: ${err.message}`);
-        console.error(`[StrategyRun] Error for ${stockInfo.symbol}:`, err.message);
       }
     }
-  } catch (globalErr: any) {
-    console.error(`[StrategyRun] Global Failure:`, globalErr.message);
-    return Response.json({ error: globalErr.message }, { status: 500 });
+  } catch (err: any) {
+    return Response.json({ error: err.message }, { status: 500 });
   }
 
-  console.log(`[StrategyRun] Success: ${results.processed} processed, ${results.auto_buys.length} buys.`);
-  return Response.json({ run_date: todayStr, circuit_broken: results.logs.length > 0, ...results });
+  return Response.json(results);
 }
