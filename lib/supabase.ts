@@ -56,6 +56,14 @@ export interface WalletRow {
   updated_at: string;
 }
 
+export interface LedgerRow {
+  id: string;
+  type: 'CREDIT' | 'DEBIT';
+  amount: number;
+  description: string | null;
+  created_at: string;
+}
+
 /* ================= CLIENT SETUP ================= */
 
 let _supabasePublic: SupabaseClient | null = null;

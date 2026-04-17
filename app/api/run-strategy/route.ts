@@ -31,7 +31,7 @@ function toPerformanceMap(rows: Array<Record<string, unknown>>): Map<string, Str
   );
 }
 
-export async function POST() {
+export async function POST(req: Request) {
   const supabase = getSupabase();
   const todayStr = new Date().toISOString().split('T')[0];
   const results = {
@@ -42,6 +42,9 @@ export async function POST() {
   };
 
   try {
+    const body = await req.json().catch(() => ({}));
+    const bypassMarketFilter = !!body.bypassMarketFilter;
+
     const [{ data: wallet }, { data: openTrades }, { data: closedTrades }, { data: strategyRows }] = await Promise.all([
       supabase.from('wallet').select('balance').eq('id', 1).single(),
       supabase.from('trades').select('*').eq('status', 'OPEN'),
@@ -72,7 +75,13 @@ export async function POST() {
         niftySeries.candles.map((candle) => candle.low),
         niftySeries.candles.map((candle) => candle.volume)
       );
-      marketBullish = niftyAnalysis.trend === 'UPTREND' && niftyAnalysis.rsi >= 50;
+      marketBullish = (niftyAnalysis.trend === 'UPTREND' && niftyAnalysis.rsi >= 50) || bypassMarketFilter;
+      
+      if (bypassMarketFilter) {
+        results.logs.push('Market filter bypassed by manual override');
+      } else if (!marketBullish) {
+        results.logs.push(`Market sentiment is BEARISH (NIFTY Trend: ${niftyAnalysis.trend}, RSI: ${niftyAnalysis.rsi.toFixed(1)})`);
+      }
     } catch {
       results.logs.push('NIFTY trend check failed, defaulting market filter to permissive mode');
     }
@@ -181,19 +190,29 @@ export async function POST() {
             }
           }
         } else {
-          if (
-            !marketBullish ||
-            analysis.decision !== 'BUY' ||
-            analysis.score < context.scoreThreshold ||
-            !context.enabled ||
-            context.marketCondition === 'BEARISH' ||
-            context.volumeStrength === 'WEAK' ||
-            openTradeRows.length >= MAX_OPEN_TRADES ||
-            capitalUsagePct >= MAX_CAPITAL_USAGE
-          ) {
-            results.logs.push(
-              `${stockInfo.symbol}: skipped (${analysis.decision}, score ${analysis.score}, threshold ${context.scoreThreshold})`
-            );
+          // New trade entry logic
+          let skipReason = '';
+
+          if (!marketBullish) {
+            skipReason = 'Market Bearish filter active';
+          } else if (analysis.decision !== 'BUY') {
+            skipReason = `Indicator decision is ${analysis.decision}`;
+          } else if (analysis.score < context.scoreThreshold) {
+            skipReason = `Score ${analysis.score} below threshold ${context.scoreThreshold}`;
+          } else if (!context.enabled) {
+            skipReason = `Strategy ${context.entryType} is disabled`;
+          } else if (context.marketCondition === 'BEARISH') {
+            skipReason = 'Strategy context is Bearish';
+          } else if (context.volumeStrength === 'WEAK') {
+            skipReason = 'Volume strength is too weak';
+          } else if (openTradeRows.length >= MAX_OPEN_TRADES) {
+            skipReason = `Max open trades (${MAX_OPEN_TRADES}) reached`;
+          } else if (capitalUsagePct >= MAX_CAPITAL_USAGE) {
+            skipReason = `Capital usage (${(capitalUsagePct * 100).toFixed(1)}%) exceeds limit (${MAX_CAPITAL_USAGE * 100}%)`;
+          }
+
+          if (skipReason) {
+            results.logs.push(`${stockInfo.symbol}: skipped (${skipReason})`);
             results.processed += 1;
             continue;
           }
@@ -209,7 +228,7 @@ export async function POST() {
           });
 
           if (sizing.quantity <= 0) {
-            results.logs.push(`${stockInfo.symbol}: sizing rejected`);
+            results.logs.push(`${stockInfo.symbol}: sizing rejected (insufficient funds)`);
             results.processed += 1;
             continue;
           }
@@ -264,7 +283,7 @@ export async function POST() {
               profit_loss: 0,
               opened_at: new Date().toISOString(),
               closed_at: null,
-            });
+            } as TradeRow);
             results.auto_buys.push(stockInfo.symbol);
           }
         }

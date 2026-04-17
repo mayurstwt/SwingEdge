@@ -1,0 +1,21 @@
+name: Scheduled Trading Execution
+
+on:
+  schedule:
+    # Runs every 5 minutes (UTC)
+    - cron: '*/5 * * * *'
+  workflow_dispatch: # Allows manual trigger from GitHub Dashboard
+
+jobs:
+  trigger-strategy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Hit Strategy API
+        run: |
+          # Note: Replace your-site-name with your actual Netlify subdomain
+          # or use the GitHub Secret method described in AUTOMATION_GUIDE.md
+          curl -X POST "https://mayurstwt-swingedge.netlify.app/api/run-strategy" \
+          -H "Content-Type: application/json" \
+          -d '{"bypassMarketFilter": false}'
+          
+          echo "Strategy trigger sent at $(date)"
