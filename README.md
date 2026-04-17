@@ -1,64 +1,492 @@
-# 📊 SwingEdge — Professional Trading Terminal
+# SwingEdge
 
-**SwingEdge** is an institutional-grade swing trading terminal for Indian NSE stocks. Built with Next.js and Supabase, it features automated paper trading with professional-grade risk management and a transparent audit trail.
+SwingEdge is a stock market practice app.
 
----
+It helps you:
 
-## 🚀 Pro-Grade Features
+- look at Indian NSE stocks
+- check whether a stock looks like a `BUY`, `HOLD`, or `AVOID`
+- save signals in a database
+- do paper trading
+- test trading ideas on old market data
+- track performance with charts
 
-- **Multi-Factor Analysis**: Uses RSI (14), MACD (12,26,9), Bollinger Bands (20,2), SMA (50, 200), and ATR Volatility.
-- **Institutional Risk Management (Circuit Breakers)**:
-    - **5% Daily Drawdown**: Stops all Auto-Buy actions if the total portfolio value drops 5% in a single day.
-    - **Concentration Limits**: Limits exposure to any single sector (e.g., Banking, IT) to 25% of total capital.
-    - **Volatility Filter**: Automatically avoids stocks with daily volatility (ATR/Price) > 4%.
-- **Realistic Execution (Slippage Simulation)**:
-    - Every automated trade includes a **0.05% slippage penalty** to simulate real-world market friction.
-    - **Liquidity Filter**: Only trades stocks with a 20-day Average Daily Volume > ₹50 Crores.
-- **Strategic Refinements**:
-    - **No-Gap-Up**: Automatically cancels entries if a stock jumps >2% at the open.
-    - **Time-Stop**: Automatically exits positions after **15 trading days** to maximize capital efficiency.
-    - **Trend Alignment**: Only buys stocks trading above their 200-day Simple Moving Average (SMA).
-- **Audit Trail & Governance**:
-    - **"The Why" Log**: Every signal and trade stores its logical justification (e.g., "RSI Oversold + Above 200 SMA").
-    - **Strategy Versioning**: Every automated trade is tagged with the logic version used (e.g., `Pro 1.2.0`).
+This app is for learning and testing. It is **not** for placing real money trades.
 
----
+## What This App Is In Simple Words
 
-## 🛠️ Technology Stack
+Imagine you had a robot helper for stock trading.
 
-- **Frontend**: Next.js 16+, Tailwind CSS, Chart.js.
-- **Backend**: Next.js API Routes (Serverless via Netlify).
-- **Database**: Supabase (PostgreSQL).
-- **Automation**: GitHub Actions (Cron triggers).
+That helper:
 
----
+- studies price charts
+- checks some rules
+- decides if a stock looks strong or weak
+- manages risk
+- keeps a record of trades
+- learns which type of trades work better over time
 
-## 🤖 Automation Engine
+That is what SwingEdge does.
 
-- **Scan Time**: 9:00 PM IST (Daily).
-- **Decision Engine**: `lib/strategy.ts` (Score 70+ for AUTO-BUY).
-- **Execution Engine**: `lib/wallet.ts` (Handles slippage, commissions, and capital allocation).
+It is like a trading lab where you can test ideas before risking real money.
 
----
+## Main Idea
 
-## 📈 Paper Portfolio Rules
+The app is trying to answer one question:
 
-- **Allocation**: Default of ₹10,000 per automated trade.
-- **Brokerage**: Simulates STT (0.1%), Brokerage (Max ₹20), and DP Charges (₹18.8 on Sell).
-- **Starting Balance**: ₹0. Use the **+ Deposit** button in the Wallet Panel to seed your account.
+**"If I have limited money, how can I take smarter trades and avoid bad ones?"**
 
----
+To do that, it uses:
 
-## 📁 Project Structure
+- technical indicators
+- risk management
+- strategy scoring
+- backtesting
+- performance tracking
 
-- `/app/api`: Serverless trading routes.
-- `/lib`:
-    - `indicators.ts`: Quantitative math.
-    - `strategy.ts`: Pro-Logic version `1.2.0`.
-    - `wallet.ts`: Brokerage & Slippage engine.
-    - `supabase.ts`: Database interfaces.
+## What You Can Do In The App
 
----
+### 1. Live Analysis
 
-## ⚖️ Disclaimer
-This tool is for **educational/simulation purposes only**. Trading involves real risk. Always consult a professional before making actual investments.
+You can search for a stock and the app will analyze it.
+
+It shows:
+
+- current price
+- RSI
+- MACD
+- SMA 50
+- SMA 200
+- Bollinger Bands
+- ATR
+- trend
+- score
+- final decision: `BUY`, `HOLD`, or `AVOID`
+
+It also gives:
+
+- a stop-loss
+- a target
+- a risk-reward ratio
+- a short reason explaining the decision
+
+### 2. Daily Signals
+
+The app can scan many stocks and save the best signals for the day.
+
+It checks stocks and stores:
+
+- symbol
+- price
+- score
+- decision
+- trend
+- RSI
+- stop-loss
+- target
+- reason
+
+This makes it easy to see which stocks looked strong on the latest scan.
+
+### 3. Paper Trading
+
+Paper trading means fake trading with virtual money.
+
+This is useful because:
+
+- you can practice without losing real money
+- you can test whether your system works
+- you can learn how position sizing and stop-losses behave
+
+The app keeps track of:
+
+- wallet balance
+- open trades
+- closed trades
+- total profit/loss
+- best trade
+- worst trade
+
+### 4. Backtesting
+
+Backtesting means running your strategy on **past** stock data.
+
+Instead of asking, “What should I buy today?”, backtesting asks:
+
+**“If I had used this system in the past, what would have happened?”**
+
+The app simulates trades candle by candle, so it behaves more like a real system.
+
+It records:
+
+- equity curve
+- drawdown curve
+- total return
+- win rate
+- average risk-reward
+- complete trade log
+
+### 5. Strategy Diagnostics
+
+Not every trade style works equally well.
+
+Some styles may be better than others.
+
+The app tracks that too.
+
+It compares things like:
+
+- entry type
+- sector
+- risk-reward bucket
+- win rate
+- total profit
+
+This helps the system become more data-driven instead of blindly using one fixed rule.
+
+## Features Explained Like You Are 15
+
+### Signals
+
+A signal is the app saying:
+
+- “This stock looks interesting”
+- “This stock looks okay”
+- “This stock looks risky”
+
+That is why signals are shown as:
+
+- `BUY`
+- `HOLD`
+- `AVOID`
+
+### Score
+
+The score is like marks in an exam.
+
+If the stock matches more good conditions, it gets a higher score.
+
+Higher score usually means:
+
+- trend is better
+- momentum is healthier
+- volume support is stronger
+
+### RSI
+
+RSI tells if a stock may be:
+
+- too weak
+- healthy
+- too hot
+
+Very high RSI can mean the stock has already moved too much.
+Very low RSI can mean weakness.
+
+### SMA 50 and SMA 200
+
+These are average prices over time.
+
+They help the app understand trend.
+
+Very simply:
+
+- above important averages can mean strength
+- below them can mean weakness
+
+### MACD
+
+MACD helps check momentum.
+
+Momentum means:
+
+“Is the stock moving with strength, or is the move fading?”
+
+### ATR
+
+ATR measures volatility.
+
+Volatility means how wildly price moves.
+
+The app uses ATR to decide:
+
+- stop-loss distance
+- targets
+- trailing stop movement
+
+### Stop-Loss
+
+A stop-loss is your safety exit.
+
+It says:
+
+**“If price falls too much, get out and protect capital.”**
+
+### Target
+
+A target is a planned profit-taking level.
+
+It says:
+
+**“If price reaches here, book some or all profit.”**
+
+### Trailing Stop-Loss
+
+A trailing stop moves upward when a trade goes in your favor.
+
+This helps:
+
+- lock in profits
+- reduce the chance of turning a winner into a loser
+
+### Partial Profit Booking
+
+This means selling only part of a position first.
+
+Example:
+
+- you bought 10 shares
+- price reaches target
+- the app sells 5 shares
+- the other 5 shares keep running
+
+This balances safety and upside.
+
+### Drawdown
+
+Drawdown means how much your account fell from its highest point.
+
+Example:
+
+- account goes from ₹50,000 to ₹55,000
+- then falls to ₹51,000
+
+That fall from the top is drawdown.
+
+This matters because a system is not only about profit.
+It is also about how painful the losses are on the way.
+
+## Advanced Features In This Version
+
+### Backtesting Engine
+
+The app can now test strategies on 1 to 3 years of OHLCV data.
+
+OHLCV means:
+
+- Open
+- High
+- Low
+- Close
+- Volume
+
+The backtest engine:
+
+- reads old candles
+- checks entry rules
+- simulates buying
+- manages stop-loss and target
+- handles trailing stop
+- handles partial exits
+- respects capital limits
+- creates a full trade log
+
+It also avoids **lookahead bias**.
+
+Lookahead bias means cheating by using future data that would not have been known at that time.
+
+This app avoids that by moving one candle at a time.
+
+### Strategy Filtering and Optimization
+
+The app checks how each strategy style has performed.
+
+If a strategy is doing badly, it can be weakened or blocked.
+
+If a strategy is doing well, it can be given more importance.
+
+It does things like:
+
+- disable strategies with poor win rate and negative profit
+- boost stronger strategies
+- change score threshold by strategy
+- give more capital to stronger strategies
+
+### Smart Exit Logic
+
+The app does not exit only because target or stop-loss is hit.
+
+It also watches for weakness after entry.
+
+It can exit when:
+
+- RSI drops below 45
+- trend weakens
+- volume becomes weak
+- ATR trailing stop is hit
+
+This makes exits more intelligent.
+
+### Capital Scaling
+
+The app changes risk based on account condition.
+
+It uses risk tiers:
+
+- `Conservative` = 0.5%
+- `Normal` = 1%
+- `Aggressive` = 1.5%
+
+If the system is doing badly or drawdown is high, risk can be reduced.
+If the system is doing well, risk can be increased carefully.
+
+### Performance Dashboard
+
+The dashboard shows charts so you can understand the system better.
+
+It includes:
+
+- equity curve
+- drawdown curve
+- strategy performance
+- sector performance
+- risk-reward distribution
+- best strategy
+- worst strategy
+
+## What Happens When You Click "Run Strategy Now"
+
+When you click that button, the app roughly does this:
+
+1. loads stock data
+2. calculates indicators
+3. scores each stock
+4. saves signals
+5. checks open trades
+6. updates trailing stop-loss
+7. books partial profit if needed
+8. exits weak trades
+9. opens new trades if conditions are good
+
+So one click can update the whole paper trading system.
+
+## What Happens When You Run A Backtest
+
+When you run a backtest, the app:
+
+1. loads historical stock candles
+2. starts with a fixed capital amount
+3. checks each candle one by one
+4. decides if a trade should open
+5. sizes the trade based on risk
+6. manages the trade using stops and exits
+7. tracks account growth over time
+8. stores the results in Supabase
+
+That is how the app creates the backtest charts.
+
+## Database Tables In Easy Language
+
+The app uses Supabase to save data.
+
+Important tables:
+
+### `signals`
+
+Stores the latest stock signals.
+
+### `trades`
+
+Stores paper trades.
+
+Includes:
+
+- buy price
+- sell price
+- quantity
+- profit/loss
+- stop-loss
+- target
+- strategy info
+
+### `wallet`
+
+Stores your virtual money balance.
+
+### `ledger`
+
+Stores money movement records like deposits and withdrawals.
+
+### `strategy_performance`
+
+Stores how well each strategy style is performing.
+
+### `backtest_runs`
+
+Stores summary of each backtest.
+
+### `backtest_trades`
+
+Stores every simulated trade from a backtest.
+
+## Project Structure
+
+### `app/`
+
+This is the frontend and API area.
+
+- `app/page.tsx` = main page
+- `app/components/` = UI pieces
+- `app/api/` = backend routes
+
+### `lib/`
+
+This is where the trading logic lives.
+
+- `indicators.ts` = math for RSI, SMA, MACD, ATR, and more
+- `strategy.ts` = signal analysis logic
+- `wallet.ts` = paper trade execution logic
+- `supabase.ts` = database types and connection
+- `lib/trading/` = backtesting, risk, performance, market data modules
+
+### `supabase/schema.sql`
+
+This is the SQL schema used to create tables.
+
+## Tech Stack
+
+This app is built with:
+
+- `Next.js` for frontend and API routes
+- `React` for UI
+- `TypeScript` for safer code
+- `Supabase` for database
+- `Chart.js` for charts
+
+## Why This App Is Useful
+
+This app is useful if you want to learn:
+
+- how trading systems are built
+- how strategies are tested
+- why risk management matters
+- why profit alone is not enough
+- how dashboards help understand data
+
+It teaches an important lesson:
+
+**A good trading system is not just about finding winners. It is about controlling losers, managing capital, and learning from data.**
+
+## Important Warning
+
+This app is for:
+
+- education
+- simulation
+- testing
+
+This app is **not financial advice**.
+
+Real markets are risky.
+Even a smart-looking system can lose money.
+Always be careful with real capital.

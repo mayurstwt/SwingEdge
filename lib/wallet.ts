@@ -1,5 +1,11 @@
 import { getSupabase, TradeRow } from './supabase';
 import { STRATEGY_VERSION } from './strategy';
+import type {
+  EntryType,
+  MarketCondition,
+  RiskTier,
+  VolumeStrength,
+} from '@/lib/trading/types';
 
 /**
  * Realistic Indian Brokerage Calculation + Slippage simulation
@@ -22,7 +28,16 @@ export async function executeAutoBuy(
   target: number,
   reason: string,
   sector: string,
-  budget: number = 10000
+  options?: {
+    quantity?: number;
+    entryType?: EntryType;
+    marketCondition?: MarketCondition;
+    volumeStrength?: VolumeStrength;
+    riskReward?: number | null;
+    strategyWeight?: number;
+    riskTier?: RiskTier;
+    entryScore?: number;
+  }
 ) {
   const supabase = getSupabase();
 
@@ -34,17 +49,17 @@ export async function executeAutoBuy(
 
   const balance = wallet?.balance ?? 0;
 
-  // 🔥 RISK BASED POSITION SIZING
-  const RISK_PERCENT = 0.01;
-  const riskAmount = balance * RISK_PERCENT;
-
   const riskPerShare = Math.abs(price - stopLoss);
+  let quantity = options?.quantity ?? 0;
 
-  if (riskPerShare <= 0) {
-    return { success: false, reason: 'Invalid SL distance' };
+  if (quantity <= 0) {
+    if (riskPerShare <= 0) {
+      return { success: false, reason: 'Invalid SL distance' };
+    }
+
+    const riskAmount = balance * 0.01;
+    quantity = Math.floor(riskAmount / riskPerShare);
   }
-
-  let quantity = Math.floor(riskAmount / riskPerShare);
 
   const maxAffordableQty = Math.floor(balance / price);
   quantity = Math.min(quantity, maxAffordableQty);
@@ -53,29 +68,15 @@ export async function executeAutoBuy(
     return { success: false, reason: 'Position size too small' };
   }
 
-  // 🔥 NEW: STRATEGY INTELLIGENCE METADATA
-
   const riskReward =
-    target && stopLoss
+    options?.riskReward ??
+    (target && stopLoss
       ? Number(((target - price) / (price - stopLoss)).toFixed(2))
-      : null;
+      : null);
 
-  const volume_strength =
-    reason?.toLowerCase().includes('volume')
-      ? 'HIGH'
-      : 'NORMAL';
-
-  const entry_type =
-    reason?.toLowerCase().includes('breakout')
-      ? 'BREAKOUT'
-      : reason?.toLowerCase().includes('pullback')
-      ? 'PULLBACK'
-      : 'MOMENTUM';
-
-  const market_condition =
-    reason?.toLowerCase().includes('uptrend')
-      ? 'BULLISH'
-      : 'NEUTRAL';
+  const volume_strength = options?.volumeStrength ?? 'NORMAL';
+  const entry_type = options?.entryType ?? 'MOMENTUM';
+  const market_condition = options?.marketCondition ?? 'NEUTRAL';
 
   // 🔥 EXECUTION
 
@@ -106,6 +107,12 @@ export async function executeAutoBuy(
     market_condition,
     volume_strength,
     risk_reward: riskReward,
+    strategy_weight: options?.strategyWeight ?? 1,
+    risk_tier: options?.riskTier ?? 'NORMAL',
+    partial_exit_count: 0,
+    initial_stop_loss: stopLoss,
+    highest_price: price,
+    entry_score: options?.entryScore ?? null,
   });
 
   if (error) {
@@ -126,18 +133,23 @@ export async function executeAutoBuy(
 export async function executeAutoSell(
   trade: TradeRow,
   currentPrice: number,
-  reason: string
+  reason: string,
+  options?: {
+    quantity?: number;
+    partial?: boolean;
+  }
 ) {
   const supabase = getSupabase();
+  const sellQuantity = Math.max(1, Math.min(options?.quantity ?? trade.quantity, trade.quantity));
 
-  const sellValue = currentPrice * trade.quantity;
+  const sellValue = currentPrice * sellQuantity;
   const sellCharges = calculateCharges(sellValue, 'sell');
   const proceeds = sellValue - sellCharges;
 
   const totalCharges = Number(trade.charges) + sellCharges;
 
   const profit_loss =
-    proceeds - (trade.buy_price * trade.quantity);
+    proceeds - (trade.buy_price * sellQuantity);
 
   const { data: wallet } = await supabase
     .from('wallet')
@@ -145,24 +157,35 @@ export async function executeAutoSell(
     .eq('id', 1)
     .single();
 
+  const partial = options?.partial === true && sellQuantity < trade.quantity;
+
+  const tradeUpdate = partial
+    ? {
+        quantity: trade.quantity - sellQuantity,
+        charges: totalCharges,
+        profit_loss: Number((Number(trade.profit_loss ?? 0) + profit_loss).toFixed(2)),
+        partial_exit_count: (trade.partial_exit_count ?? 0) + 1,
+        target: null,
+        highest_price: Math.max(Number(trade.highest_price ?? trade.buy_price), currentPrice),
+        reason: `${trade.reason ?? ''} | Partial Exit: ${reason}`.trim(),
+      }
+    : {
+        sell_price: Number(currentPrice.toFixed(2)),
+        status: 'CLOSED',
+        charges: totalCharges,
+        profit_loss: Number((Number(trade.profit_loss ?? 0) + profit_loss).toFixed(2)),
+        closed_at: new Date().toISOString(),
+        highest_price: Math.max(Number(trade.highest_price ?? trade.buy_price), currentPrice),
+        reason: `${trade.reason ?? ''} | Exit: ${reason}`.trim(),
+      };
+
   await Promise.all([
-    supabase.from('trades').update({
-      sell_price: Number(currentPrice.toFixed(2)),
-      status: 'CLOSED',
-      charges: totalCharges,
-      profit_loss,
-      closed_at: new Date().toISOString(),
-
-      // 🔥 KEEP ORIGINAL + APPEND EXIT REASON
-      reason: `${trade.reason} | Exit: ${reason}`,
-
-    }).eq('id', trade.id),
-
+    supabase.from('trades').update(tradeUpdate).eq('id', trade.id),
     supabase.from('wallet').update({
       balance: (wallet?.balance ?? 0) + proceeds,
       updated_at: new Date().toISOString(),
     }).eq('id', 1),
   ]);
 
-  return { success: true, pnl: profit_loss, reason };
+  return { success: true, pnl: profit_loss, reason, partial, proceeds };
 }

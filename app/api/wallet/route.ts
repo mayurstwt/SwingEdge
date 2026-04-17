@@ -21,7 +21,7 @@ export async function GET() {
       ledger:  ledgerRes.data ?? [],
       signals: signalsRes.data ?? [],
     });
-  } catch (err) {
+  } catch {
     return Response.json({ error: 'DB Connection Error' }, { status: 500 });
   }
 }
@@ -131,7 +131,8 @@ export async function POST(req: Request) {
     }
 
     return Response.json({ error: 'Invalid action' }, { status: 400 });
-  } catch (err: any) {
-    return Response.json({ error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Wallet operation failed';
+    return Response.json({ error: message }, { status: 500 });
   }
 }

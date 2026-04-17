@@ -239,6 +239,106 @@ body {
   gap: 6px;
 }
 
+.performance-dashboard {
+  margin-top: 24px;
+  padding: 20px;
+  border: 1px solid var(--border-card);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(15, 26, 48, 0.92), rgba(9, 15, 29, 0.96));
+  box-shadow: var(--shadow-card);
+}
+
+.performance-header,
+.chart-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.panel-pretitle {
+  color: var(--accent-cyan);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.panel-title {
+  font-size: 1.35rem;
+  letter-spacing: -0.03em;
+}
+
+.performance-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 20px;
+}
+
+.chart-panel {
+  min-height: 360px;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid var(--border-card);
+  background: rgba(13, 22, 41, 0.88);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 14px;
+  overflow: hidden;
+}
+
+.chart-panel.wide {
+  grid-column: 1 / -1;
+}
+
+.chart-viewport {
+  position: relative;
+  width: 100%;
+  height: 280px;
+  min-height: 280px;
+}
+
+.chart-viewport canvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+}
+
+.chart-panel-head h3 {
+  font-size: 1rem;
+}
+
+.chart-panel-head span {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  font-family: var(--font-mono);
+}
+
+.chart-empty {
+  height: 280px;
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.strategy-table-wrap {
+  margin-top: 18px;
+}
+
+@media (max-width: 960px) {
+  .performance-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .chart-panel.wide {
+    grid-column: auto;
+  }
+}
+
 /* ==========================================
    LIVE DOT
    ========================================== */
@@ -2020,11 +2120,41 @@ body {
   animation: fadeUp 0.2s ease;
 }
 
+.wallet-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.wallet-action-btn {
+  padding: 9px 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-card);
+  border-radius: 10px;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.wallet-action-btn:hover,
+.wallet-action-btn.active {
+  border-color: var(--border-cyan);
+  color: var(--accent-cyan);
+  background: rgba(0, 212, 255, 0.08);
+}
+
 .form-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
   margin-bottom: 10px;
+}
+
+.form-row.single {
+  grid-template-columns: 1fr;
 }
 
 .form-input {
@@ -2056,19 +2186,59 @@ body {
 
 .submit-trade-btn {
   width: 100%;
-  padding: 11px;
-  background: linear-gradient(135deg, rgba(0, 230, 118, 0.2), rgba(0, 230, 118, 0.1));
-  border: 1px solid rgba(0, 230, 118, 0.35);
-  border-radius: 10px;
-  color: var(--color-buy);
-  font-size: 0.88rem;
+  padding: 12px;
+  border-radius: 12px;
+  font-size: 0.95rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 1px solid transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  font-family: var(--font-sans);
 }
 
-.submit-trade-btn:hover:not(:disabled) {
-  background: rgba(0, 230, 118, 0.25);
+.submit-trade-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  filter: grayscale(1);
+}
+
+/* Green theme for Buy/Deposit */
+.buy-btn,
+.deposit-btn,
+.submit-trade-btn:not(.sell-btn):not(.withdraw-btn) {
+  background: linear-gradient(135deg, var(--accent-green) 0%, #00c853 100%);
+  border-color: rgba(0, 230, 118, 0.3);
+  color: #051a0f;
+  box-shadow: 0 4px 15px rgba(0, 230, 118, 0.2);
+}
+
+.buy-btn:hover:not(:disabled),
+.deposit-btn:hover:not(:disabled),
+.submit-trade-btn:not(.sell-btn):not(.withdraw-btn):hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 230, 118, 0.35);
+  filter: brightness(1.1);
+}
+
+/* Red theme for Sell/Withdraw */
+.sell-btn,
+.withdraw-btn {
+  background: linear-gradient(135deg, var(--accent-red) 0%, #e62e5c 100%);
+  border-color: rgba(255, 61, 113, 0.3);
+  color: #ffffff;
+  box-shadow: 0 4px 15px rgba(255, 61, 113, 0.2);
+}
+
+.sell-btn:hover:not(:disabled),
+.withdraw-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(255, 61, 113, 0.35);
+  filter: brightness(1.1);
 }
 
 /* Trade tabs */
@@ -2155,6 +2325,36 @@ body {
   align-items: center;
   gap: 10px;
   flex-shrink: 0;
+}
+
+.trade-right.stacked {
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.daily-pnl-list,
+.ledger-panel {
+  margin-top: 18px;
+}
+
+.daily-pnl-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  gap: 12px;
+}
+
+.wallet-success {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  background: rgba(0, 230, 118, 0.1);
+  border: 1px solid rgba(0, 230, 118, 0.25);
+  border-radius: 12px;
+  color: var(--color-buy);
 }
 
 .trade-pnl {
@@ -2341,6 +2541,7 @@ body {
 .mt-4 {
   margin-top: 1rem;
 }
+
 /* ── Automation UI Improvements ── */
 .trade-header-row {
   display: flex;
@@ -2374,8 +2575,13 @@ body {
   gap: 4px;
 }
 
-.level-item.SL { color: var(--color-avoid); }
-.level-item.TGT { color: var(--color-buy); }
+.level-item.SL {
+  color: var(--color-avoid);
+}
+
+.level-item.TGT {
+  color: var(--color-buy);
+}
 
 .level-item::before {
   content: '';
@@ -2384,8 +2590,15 @@ body {
   border-radius: 50%;
 }
 
-.level-item.SL::before { background: var(--color-avoid); box-shadow: 0 0 8px var(--color-avoid); }
-.level-item.TGT::before { background: var(--color-buy); box-shadow: 0 0 8px var(--color-buy); }
+.level-item.SL::before {
+  background: var(--color-avoid);
+  box-shadow: 0 0 8px var(--color-avoid);
+}
+
+.level-item.TGT::before {
+  background: var(--color-buy);
+  box-shadow: 0 0 8px var(--color-buy);
+}
 
 /* ── Pro UI Improvements ── */
 .sector-tag {
@@ -2407,8 +2620,13 @@ body {
   opacity: 0.85;
 }
 
-.level-item.TGT { color: #00ff99; }
-.level-item.SL { color: #ff3d71; }
+.level-item.TGT {
+  color: #00ff99;
+}
+
+.level-item.SL {
+  color: #ff3d71;
+}
 
 /* ── Debug & Pro UI ── */
 .auto-label {
@@ -2434,7 +2652,7 @@ body {
   font-size: 0.75rem;
   margin-top: 10px;
   color: #ff8aab;
-  background: rgba(0,0,0,0.2);
+  background: rgba(0, 0, 0, 0.2);
   padding: 8px;
   border-radius: 4px;
 }
@@ -2452,7 +2670,10 @@ body {
   text-overflow: ellipsis;
 }
 
-.skeleton-row.tall { height: 200px; opacity: 0.3; }
+.skeleton-row.tall {
+  height: 200px;
+  opacity: 0.3;
+}
 
 /* ── Wallet Summary Grid ── */
 .wallet-summary-grid {
@@ -2494,8 +2715,13 @@ body {
   color: var(--text-primary);
 }
 
-.credit-color { color: var(--accent-green); }
-.debit-color { color: var(--accent-red); }
+.credit-color {
+  color: var(--accent-green);
+}
+
+.debit-color {
+  color: var(--accent-red);
+}
 
 @media (max-width: 640px) {
   .wallet-summary-grid {

@@ -25,8 +25,8 @@ export default function SignalsDashboard({ onSelectStock }: SignalsDashboardProp
       if (!res.ok) throw new Error(data.error ?? 'Failed to load signals');
       setSignals(data.signals ?? []);
       setRunDate(data.last_updated_at ?? data.run_date ?? null);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to load signals');
     } finally {
       setIsLoading(false);
     }
@@ -54,14 +54,22 @@ export default function SignalsDashboard({ onSelectStock }: SignalsDashboardProp
 
       await fetchSignals();
       await fetch('/api/wallet');
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Strategy run failed');
     } finally {
       setIsRunning(false);
     }
   };
 
-  const filtered = filter === 'ALL' ? signals : signals.filter(s => s.decision === filter);
+  const sortedSignals = [...signals].sort((a, b) => {
+    const weights = { BUY: 1, HOLD: 2, AVOID: 3 };
+    if (weights[a.decision] !== weights[b.decision]) {
+      return weights[a.decision] - weights[b.decision];
+    }
+    return b.score - a.score;
+  });
+
+  const filtered = filter === 'ALL' ? sortedSignals : sortedSignals.filter(s => s.decision === filter);
   const counts = {
     BUY:   signals.filter(s => s.decision === 'BUY').length,
     HOLD:  signals.filter(s => s.decision === 'HOLD').length,
@@ -151,7 +159,7 @@ export default function SignalsDashboard({ onSelectStock }: SignalsDashboardProp
         !isLoading && !isRunning && (
           <div className="dash-empty">
             <p>No signals found in the database.</p>
-            <p className="sub">Click "Run Strategy Now" to scan the market.</p>
+            <p className="sub">Click &quot;Run Strategy Now&quot; to scan the market.</p>
           </div>
         )
       )}

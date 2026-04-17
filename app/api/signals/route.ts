@@ -36,7 +36,8 @@ export async function GET() {
       last_updated_at: latestRun.updated_at,
       fetched_at: today 
     });
-  } catch (err: any) {
-    return Response.json({ error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Failed to fetch signals';
+    return Response.json({ error: message }, { status: 500 });
   }
 }

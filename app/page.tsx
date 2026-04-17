@@ -7,6 +7,7 @@ import MarketOverview from './components/MarketOverview';
 import StockCard from './components/StockCard';
 import SignalsDashboard from './components/SignalsDashboard';
 import WalletPanel from './components/WalletPanel';
+import PerformanceDashboard from './components/performance/PerformanceDashboard';
 import type { AnalysisResult } from '@/lib/strategy';
 
 const PriceChart = dynamic(() => import('./components/PriceChart'), { ssr: false });
@@ -20,7 +21,7 @@ type StockData = AnalysisResult & {
 type MainTab = 'live' | 'signals';
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<MainTab>('live');
+  const [activeTab, setActiveTab] = useState<MainTab>('signals');
   const [stockData, setStockData] = useState<StockData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -208,6 +209,7 @@ export default function Home() {
       {activeTab === 'signals' && (
         <section className="signals-tab-content" id="signals-tab-content">
           <SignalsDashboard onSelectStock={handleSignalSelect} />
+          <PerformanceDashboard />
           <WalletPanel />
         </section>
       )}

@@ -1,6 +1,5 @@
 import {
   calculateSMA,
-  calculateEMA,
   calculateRSI,
   calculateMACD,
   calculateBollingerBands,
@@ -38,6 +37,7 @@ export interface AnalysisResult {
   trend: "UPTREND" | "DOWNTREND" | "SIDEWAYS";
   signals: string[];
   reason: string;
+  atr: number;
   priceHistory: number[];
   sma50History: (number | null)[];
   sma200History: (number | null)[];
@@ -63,9 +63,6 @@ export function analyzeStock(
   const sma200Arr = calculateSMA(closes, 200);
   const sma50 = sma50Arr[sma50Arr.length - 1];
   const sma200 = sma200Arr[sma200Arr.length - 1];
-
-  const ema12Arr = calculateEMA(closes, 12);
-  const ema26Arr = calculateEMA(closes, 26);
 
   const rsi = calculateRSI(closes, 14);
   const macd = calculateMACD(closes);
@@ -204,6 +201,7 @@ export function analyzeStock(
     trend: price > (sma50 || 0) && (sma50 || 0) > (sma200 || 0) ? "UPTREND" : (price < (sma50 || 0) ? "DOWNTREND" : "SIDEWAYS"),
     signals,
     reason,
+    atr,
     priceHistory: closes.slice(-historySlice).map((v) => parseFloat(v.toFixed(2))),
     sma50History: sma50Arr.slice(-historySlice),
     sma200History: sma200Arr.slice(-historySlice),
