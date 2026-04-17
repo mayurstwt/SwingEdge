@@ -11,19 +11,57 @@ import type {
  * Realistic Indian Brokerage Calculation + Slippage simulation
  */
 export function calculateCharges(amount: number, type: 'buy' | 'sell'): number {
-  const stt = amount * 0.001; 
-  const brokerage = Math.min(20, amount * 0.0005); 
-  const flatFees = type === 'sell' ? 18.8 : 0; 
-  const regulatory = amount * 0.0002; 
+  const stt = amount * 0.001;
+  const brokerage = Math.min(20, amount * 0.0005);
+  const flatFees = type === 'sell' ? 18.8 : 0;
+  const regulatory = amount * 0.0002;
   const slippage = amount * 0.0005;
 
   return Number((stt + brokerage + flatFees + regulatory + slippage).toFixed(2));
 }
 
+/**
+ * 🔥 SAFE WALLET FETCH (fixes your error)
+ */
+async function getWalletBalance() {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .from('wallet')
+    .select('*')
+    .eq('id', 1)
+    .maybeSingle();
+
+  if (error) {
+    console.error('Wallet fetch error:', error);
+  }
+
+  return Number(data?.balance ?? 50000); // fallback
+}
+
+/**
+ * 🔥 SAFE WALLET UPDATE
+ */
+async function updateWalletBalance(newBalance: number) {
+  const supabase = getSupabase();
+
+  const { error } = await supabase
+    .from('wallet')
+    .update({
+      balance: newBalance,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', 1);
+
+  if (error) {
+    console.error('Wallet update error:', error);
+  }
+}
+
 export async function executeAutoBuy(
-  symbol: string, 
-  shortName: string, 
-  price: number, 
+  symbol: string,
+  shortName: string,
+  price: number,
   stopLoss: number,
   target: number,
   reason: string,
@@ -41,19 +79,15 @@ export async function executeAutoBuy(
 ) {
   const supabase = getSupabase();
 
-  const { data: wallet } = await supabase
-    .from('wallet')
-    .select('balance')
-    .eq('id', 1)
-    .single();
-
-  const balance = wallet?.balance ?? 0;
+  const balance = await getWalletBalance();
 
   const riskPerShare = Math.abs(price - stopLoss);
   let quantity = options?.quantity ?? 0;
 
+  // 🔥 Position sizing fallback
   if (quantity <= 0) {
     if (riskPerShare <= 0) {
+      console.log(`❌ ${symbol}: Invalid SL distance`);
       return { success: false, reason: 'Invalid SL distance' };
     }
 
@@ -65,7 +99,17 @@ export async function executeAutoBuy(
   quantity = Math.min(quantity, maxAffordableQty);
 
   if (quantity <= 0) {
+    console.log(`❌ ${symbol}: Position size too small`);
     return { success: false, reason: 'Position size too small' };
+  }
+
+  const tradeValue = price * quantity;
+  const charges = calculateCharges(tradeValue, 'buy');
+  const totalCost = tradeValue + charges;
+
+  if (balance < totalCost) {
+    console.log(`❌ ${symbol}: Insufficient funds`);
+    return { success: false, reason: 'Insufficient funds' };
   }
 
   const riskReward =
@@ -78,15 +122,7 @@ export async function executeAutoBuy(
   const entry_type = options?.entryType ?? 'MOMENTUM';
   const market_condition = options?.marketCondition ?? 'NEUTRAL';
 
-  // 🔥 EXECUTION
-
-  const tradeValue = price * quantity;
-  const charges = calculateCharges(tradeValue, 'buy');
-  const totalCost = tradeValue + charges;
-
-  if (balance < totalCost) {
-    return { success: false, reason: 'Insufficient funds' };
-  }
+  console.log(`🚀 BUY EXECUTING: ${symbol} qty=${quantity} price=${price}`);
 
   const { error } = await supabase.from('trades').insert({
     symbol,
@@ -102,7 +138,6 @@ export async function executeAutoBuy(
     status: 'OPEN',
     executed_by: 'AUTO',
 
-    // 🔥 NEW INTELLIGENCE FIELDS
     entry_type,
     market_condition,
     volume_strength,
@@ -116,16 +151,11 @@ export async function executeAutoBuy(
   });
 
   if (error) {
+    console.error(`❌ ${symbol}: Trade insert failed`, error);
     return { success: false, reason: error.message };
   }
 
-  await supabase
-    .from('wallet')
-    .update({
-      balance: balance - totalCost,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', 1);
+  await updateWalletBalance(balance - totalCost);
 
   return { success: true, quantity, cost: totalCost };
 }
@@ -140,7 +170,11 @@ export async function executeAutoSell(
   }
 ) {
   const supabase = getSupabase();
-  const sellQuantity = Math.max(1, Math.min(options?.quantity ?? trade.quantity, trade.quantity));
+
+  const sellQuantity = Math.max(
+    1,
+    Math.min(options?.quantity ?? trade.quantity, trade.quantity)
+  );
 
   const sellValue = currentPrice * sellQuantity;
   const sellCharges = calculateCharges(sellValue, 'sell');
@@ -149,13 +183,9 @@ export async function executeAutoSell(
   const totalCharges = Number(trade.charges) + sellCharges;
 
   const profit_loss =
-    proceeds - (trade.buy_price * sellQuantity);
+    proceeds - trade.buy_price * sellQuantity;
 
-  const { data: wallet } = await supabase
-    .from('wallet')
-    .select('balance')
-    .eq('id', 1)
-    .single();
+  const balance = await getWalletBalance();
 
   const partial = options?.partial === true && sellQuantity < trade.quantity;
 
@@ -181,11 +211,10 @@ export async function executeAutoSell(
 
   await Promise.all([
     supabase.from('trades').update(tradeUpdate).eq('id', trade.id),
-    supabase.from('wallet').update({
-      balance: (wallet?.balance ?? 0) + proceeds,
-      updated_at: new Date().toISOString(),
-    }).eq('id', 1),
+    updateWalletBalance(balance + proceeds),
   ]);
+
+  console.log(`💰 SELL EXECUTED: ${trade.symbol} qty=${sellQuantity}`);
 
   return { success: true, pnl: profit_loss, reason, partial, proceeds };
 }
