@@ -70,7 +70,7 @@ const chartOptions = {
   responsive: true,
   maintainAspectRatio: false,
   resizeDelay: 150,
-  animation: false,
+  animation: false as const
 };
 
 export default function PerformanceDashboard() {
