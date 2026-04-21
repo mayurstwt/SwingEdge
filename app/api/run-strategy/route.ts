@@ -20,22 +20,25 @@ const MIN_CONFIDENCE = 55;
 
 function toPerformanceMap(rows: Array<Record<string, unknown>>): Map<string, StrategyPerformanceSnapshot> {
   return new Map(
-    rows.map((row) => [
-      String(row.entry_type),
-      {
-        entryType: String(row.entry_type),
-        avgProfit: Number(row.avg_profit ?? 0),
-        winRate: Number(row.win_rate ?? 0),
-        tradesCount: Number(row.trades_count ?? 0),
-        totalProfit: Number(row.total_profit ?? 0),
-        dynamicScoreThreshold: Math.min(65, Number(row.dynamic_score_threshold ?? 60)), // 🔥 capped
-        capitalWeight: Number(row.capital_weight ?? 1),
-        enabled: Boolean(row.enabled ?? true),
-      },
-    ])
+    rows.map((row) => {
+      const entryType = String(row.entry_type) as StrategyPerformanceSnapshot['entryType'];
+
+      return [
+        entryType,
+        {
+          entryType,
+          avgProfit: Number(row.avg_profit ?? 0),
+          winRate: Number(row.win_rate ?? 0),
+          tradesCount: Number(row.trades_count ?? 0),
+          totalProfit: Number(row.total_profit ?? 0),
+          dynamicScoreThreshold: Math.min(65, Number(row.dynamic_score_threshold ?? 60)),
+          capitalWeight: Number(row.capital_weight ?? 1),
+          enabled: Boolean(row.enabled ?? true),
+        },
+      ];
+    })
   );
 }
-
 export async function POST(req: Request) {
   const supabase = getSupabase();
   const todayStr = new Date().toISOString().split('T')[0];
