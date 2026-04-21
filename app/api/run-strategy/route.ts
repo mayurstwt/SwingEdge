@@ -31,7 +31,7 @@ function toPerformanceMap(rows: Array<Record<string, unknown>>): Map<string, Str
           winRate: Number(row.win_rate ?? 0),
           tradesCount: Number(row.trades_count ?? 0),
           totalProfit: Number(row.total_profit ?? 0),
-          dynamicScoreThreshold: Math.min(65, Number(row.dynamic_score_threshold ?? 60)),
+          dynamicScoreThreshold: Number(row.dynamic_score_threshold ?? 60),
           capitalWeight: Number(row.capital_weight ?? 1),
           enabled: Boolean(row.enabled ?? true),
         },
@@ -39,6 +39,7 @@ function toPerformanceMap(rows: Array<Record<string, unknown>>): Map<string, Str
     })
   );
 }
+
 export async function POST(req: Request) {
   const supabase = getSupabase();
   const todayStr = new Date().toISOString().split('T')[0];
