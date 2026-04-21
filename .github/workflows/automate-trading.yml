@@ -2,20 +2,35 @@ name: Scheduled Trading Execution
 
 on:
   schedule:
-    # Runs every 5 minutes (UTC)
-    - cron: '*/5 * * * *'
+    # NSE market hours: 9:15 AM – 3:30 PM IST = 3:45 AM – 10:00 AM UTC
+    # Run every 5 minutes, Monday–Friday only
+    - cron: '*/5 4-9 * * 1-5'
+    # Also catch 10:00 AM UTC = 3:30 PM IST close
+    - cron: '0 10 * * 1-5'
   workflow_dispatch: # Allows manual trigger from GitHub Dashboard
 
 jobs:
   trigger-strategy:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+
     steps:
-      - name: Hit Strategy API
+      - name: Trigger run-strategy API
         run: |
-          # Note: Replace your-site-name with your actual Netlify subdomain
-          # or use the GitHub Secret method described in AUTOMATION_GUIDE.md
-          curl -X POST "https://swingedge.netlify.app/api/run-strategy" \
-          -H "Content-Type: application/json" \
-          -d '{"bypassMarketFilter": false}'
-          
-          echo "Strategy trigger sent at $(date)"
+          echo "Triggering strategy at $(date) UTC..."
+
+          HTTP_STATUS=$(curl -s -o /tmp/response.json -w "%{http_code}" \
+            -X POST "${{ secrets.NETLIFY_APP_URL }}/api/run-strategy" \
+            -H "Content-Type: application/json" \
+            -d '{"bypassMarketFilter": false}' \
+            --max-time 90)
+
+          echo "--- HTTP Status: $HTTP_STATUS ---"
+          cat /tmp/response.json | python3 -m json.tool 2>/dev/null || cat /tmp/response.json
+
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "::warning::Strategy run returned HTTP $HTTP_STATUS"
+            exit 1
+          fi
+
+          echo "✅ Strategy run completed successfully"

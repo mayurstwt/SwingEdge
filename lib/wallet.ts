@@ -1,4 +1,4 @@
-import { getSupabase, TradeRow } from './supabase';
+import { getSupabaseAdmin, TradeRow } from './supabase';
 import { STRATEGY_VERSION } from './strategy';
 import type {
   EntryType,
@@ -24,7 +24,8 @@ export function calculateCharges(amount: number, type: 'buy' | 'sell'): number {
  * 🔥 SAFE WALLET FETCH (fixes your error)
  */
 async function getWalletBalance() {
-  const supabase = getSupabase();
+  // Must use admin client — wallet table has RLS enabled
+  const supabase = getSupabaseAdmin();
 
   const { data, error } = await supabase
     .from('wallet')
@@ -36,14 +37,15 @@ async function getWalletBalance() {
     console.error('Wallet fetch error:', error);
   }
 
-  return Number(data?.balance ?? 50000); // fallback
+  return Number(data?.balance ?? 50000);
 }
 
 /**
  * 🔥 SAFE WALLET UPDATE
  */
 async function updateWalletBalance(newBalance: number) {
-  const supabase = getSupabase();
+  // Must use admin client — wallet table has RLS enabled
+  const supabase = getSupabaseAdmin();
 
   const { error } = await supabase
     .from('wallet')
@@ -77,7 +79,8 @@ export async function executeAutoBuy(
     entryScore?: number;
   }
 ) {
-  const supabase = getSupabase();
+  // Must use admin client — trades table has RLS enabled
+  const supabase = getSupabaseAdmin();
 
   const balance = await getWalletBalance();
 
@@ -169,7 +172,8 @@ export async function executeAutoSell(
     partial?: boolean;
   }
 ) {
-  const supabase = getSupabase();
+  // Must use admin client — trades table has RLS enabled
+  const supabase = getSupabaseAdmin();
 
   const sellQuantity = Math.max(
     1,
