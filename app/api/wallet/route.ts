@@ -1,4 +1,4 @@
-import { getSupabase } from '@/lib/supabase';
+import { getSupabase, getSupabaseAdmin } from '@/lib/supabase';
 import { calculateCharges } from '@/lib/wallet';
 
 export async function GET() {
@@ -28,7 +28,8 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    const supabase = getSupabase();
+    // Must use admin client — wallet and trades have RLS enabled
+    const supabase = getSupabaseAdmin();
     const body = await req.json();
     const { action } = body;
 

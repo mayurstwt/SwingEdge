@@ -1,9 +1,9 @@
-import { getSupabase } from '@/lib/supabase';
+import { getSupabaseAdmin } from '@/lib/supabase';
 import { GET as getAnalytics } from '@/app/api/analytics/route';
 
 export async function GET() {
   try {
-    const supabase = getSupabase();
+    const supabase = getSupabaseAdmin();
 
     const [analyticsRaw, latestBacktestRes, strategyRes] = await Promise.all([
       getAnalytics(),

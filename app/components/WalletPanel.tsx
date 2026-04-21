@@ -101,23 +101,42 @@ export default function WalletPanel() {
   const overallPnL = realizedPnL + unrealizedPnL;
 
   const dailyPnlRows = useMemo(() => {
-    return closedTrades.reduce<DailyPnlRow[]>((rows, trade) => {
+    // Aggregate closed trades by date
+    const closedByDate = closedTrades.reduce<DailyPnlRow[]>((rows, trade) => {
       const date = (trade.closed_at ?? trade.opened_at).slice(0, 10);
       const existing = rows.find((row) => row.date === date);
       const pnl = Number(trade.profit_loss ?? 0);
-
       if (existing) {
         existing.pnl += pnl;
         existing.trades += 1;
       } else {
         rows.push({ date, pnl, trades: 1 });
       }
-
       return rows;
-    }, []).sort((left, right) => right.date.localeCompare(left.date));
-  }, [closedTrades]);
+    }, []);
+
+    // Add today's row with open-trade unrealized P&L even if no closes yet
+    const todayDate = new Date().toISOString().slice(0, 10);
+    const openUnrealizedToday = openTrades
+      .filter((t) => t.opened_at?.slice(0, 10) === todayDate)
+      .reduce((sum, t) => {
+        const cp = signalMap.get(t.symbol.trim());
+        return sum + (cp ? (cp - t.buy_price) * t.quantity : 0);
+      }, 0);
+
+    const todayRow = closedByDate.find((r) => r.date === todayDate);
+    if (todayRow) {
+      // annotate that unrealized is included
+      todayRow.pnl += openUnrealizedToday;
+    } else if (openUnrealizedToday !== 0 || openTrades.some((t) => t.opened_at?.slice(0, 10) === todayDate)) {
+      closedByDate.push({ date: todayDate, pnl: openUnrealizedToday, trades: 0 });
+    }
+
+    return closedByDate.sort((a, b) => b.date.localeCompare(a.date));
+  }, [closedTrades, openTrades, signalMap]);
 
   const today = new Date().toISOString().slice(0, 10);
+  // Today P&L = realized closes today + unrealized open trades
   const todayPnl = dailyPnlRows.find((row) => row.date === today)?.pnl ?? 0;
   const openProfitCount = openTrades.filter((trade) => {
     const currentPrice = signalMap.get(trade.symbol.trim());
@@ -438,13 +457,21 @@ export default function WalletPanel() {
       {activeTab === 'daily' ? (
         <div className="daily-pnl-list">
           {dailyPnlRows.length === 0 ? (
-            <div className="trades-empty">No closed trades yet, so daily P&amp;L is empty.</div>
+            <div className="trades-empty">
+              No closed trades yet. Open trades will appear here once closed, or when opened today.
+            </div>
           ) : (
             dailyPnlRows.map((row) => (
               <div key={row.date} className="daily-pnl-card">
                 <div className="trade-left">
-                  <span className="trade-sym">{row.date}</span>
-                  <span className="trade-meta">{row.trades} closed trade{row.trades > 1 ? 's' : ''}</span>
+                  <span className="trade-sym">
+                    {row.date === today ? '📅 Today' : row.date}
+                  </span>
+                  <span className="trade-meta">
+                    {row.trades > 0
+                      ? `${row.trades} closed trade${row.trades > 1 ? 's' : ''}`
+                      : 'Open positions (unrealized)'}
+                  </span>
                 </div>
                 <div className={`trade-right ${row.pnl >= 0 ? 'buy-color' : 'avoid-color'}`}>
                   {row.pnl >= 0 ? '+' : ''}{fmt(row.pnl)}
@@ -455,39 +482,95 @@ export default function WalletPanel() {
         </div>
       ) : (
         <div className="trades-list">
-          {(activeTab === 'open' ? openTrades : closedTrades).length === 0 ? (
+          {(activeTab === 'open' ? openTrades : [...closedTrades].sort((a, b) =>
+            new Date(b.closed_at ?? b.opened_at).getTime() -
+            new Date(a.closed_at ?? a.opened_at).getTime()
+          )).length === 0 ? (
             <div className="trades-empty">
               {activeTab === 'open' ? 'No open trades right now.' : 'No closed trades yet.'}
             </div>
           ) : (
-            (activeTab === 'open' ? openTrades : closedTrades).map((trade) => {
-              const currentPrice = signalMap.get(trade.symbol.trim());
-              const livePnl =
-                trade.status === 'OPEN' && currentPrice
-                  ? (currentPrice - trade.buy_price) * trade.quantity
-                  : Number(trade.profit_loss ?? 0);
+            (() => {
+              const list = activeTab === 'open'
+                ? openTrades
+                : [...closedTrades].sort((a, b) =>
+                    new Date(b.closed_at ?? b.opened_at).getTime() -
+                    new Date(a.closed_at ?? a.opened_at).getTime()
+                  );
 
-              return (
-                <div key={trade.id} className="trade-card">
-                  <div className="trade-left">
-                    <span className="trade-sym">{trade.symbol}</span>
-                    <span className="trade-name">{trade.short_name ?? trade.symbol}</span>
-                    <span className="trade-meta">
-                      Qty {trade.quantity} @ {fmt(trade.buy_price)}
-                      {trade.status === 'OPEN' && currentPrice ? ` | LTP ${fmt(currentPrice)}` : ''}
-                    </span>
+              if (activeTab === 'open') {
+                return list.map((trade) => {
+                  const currentPrice = signalMap.get(trade.symbol.trim());
+                  const livePnl = currentPrice
+                    ? (currentPrice - trade.buy_price) * trade.quantity
+                    : 0;
+                  return (
+                    <div key={trade.id} className="trade-card">
+                      <div className="trade-left">
+                        <span className="trade-sym">{trade.symbol}</span>
+                        <span className="trade-name">{trade.short_name ?? trade.symbol}</span>
+                        <span className="trade-meta">
+                          Qty {trade.quantity} @ {fmt(trade.buy_price)}
+                          {currentPrice ? ` | LTP ${fmt(currentPrice)}` : ''}
+                        </span>
+                      </div>
+                      <div className="trade-right stacked">
+                        <span className="decision-badge hold">OPEN</span>
+                        <span className={livePnl >= 0 ? 'buy-color' : 'avoid-color'}>
+                          {livePnl >= 0 ? '+' : ''}{fmt(livePnl)}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                });
+              }
+
+              // History: group by date
+              const byDate: Record<string, typeof list> = {};
+              for (const trade of list) {
+                const d = (trade.closed_at ?? trade.opened_at).slice(0, 10);
+                if (!byDate[d]) byDate[d] = [];
+                byDate[d].push(trade);
+              }
+
+              return Object.entries(byDate).map(([date, dateTrades]) => (
+                <div key={date}>
+                  <div style={{
+                    padding: '6px 12px',
+                    fontSize: '0.72rem',
+                    fontWeight: 700,
+                    letterSpacing: '0.08em',
+                    textTransform: 'uppercase',
+                    color: 'var(--text-muted, #888)',
+                    borderBottom: '1px solid rgba(255,255,255,0.06)',
+                    marginTop: '8px',
+                  }}>
+                    {date === today ? '📅 Today' : date}
                   </div>
-                  <div className="trade-right stacked">
-                    <span className={`decision-badge ${trade.status === 'OPEN' ? 'hold' : Number(livePnl) >= 0 ? 'buy' : 'avoid'}`}>
-                      {trade.status}
-                    </span>
-                    <span className={livePnl >= 0 ? 'buy-color' : 'avoid-color'}>
-                      {livePnl >= 0 ? '+' : ''}{fmt(livePnl)}
-                    </span>
-                  </div>
+                  {dateTrades.map((trade) => {
+                    const pnl = Number(trade.profit_loss ?? 0);
+                    return (
+                      <div key={trade.id} className="trade-card">
+                        <div className="trade-left">
+                          <span className="trade-sym">{trade.symbol}</span>
+                          <span className="trade-name">{trade.short_name ?? trade.symbol}</span>
+                          <span className="trade-meta">
+                            Qty {trade.quantity} @ {fmt(trade.buy_price)}
+                            {trade.sell_price ? ` → ${fmt(trade.sell_price)}` : ''}
+                          </span>
+                        </div>
+                        <div className="trade-right stacked">
+                          <span className={`decision-badge ${pnl >= 0 ? 'buy' : 'avoid'}`}>CLOSED</span>
+                          <span className={pnl >= 0 ? 'buy-color' : 'avoid-color'}>
+                            {pnl >= 0 ? '+' : ''}{fmt(pnl)}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              );
-            })
+              ));
+            })()
           )}
         </div>
       )}

@@ -79,6 +79,8 @@ export default function PerformanceDashboard() {
   const [runningBacktest, setRunningBacktest] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [lastRefreshed, setLastRefreshed] = useState<string | null>(null);
+
   async function fetchPerformance() {
     setLoading(true);
     setError(null);
@@ -90,6 +92,7 @@ export default function PerformanceDashboard() {
         throw new Error(payload.error ?? 'Failed to load performance data');
       }
       setData(payload);
+      setLastRefreshed(new Date().toLocaleTimeString('en-IN'));
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to load performance data');
     } finally {
@@ -99,6 +102,10 @@ export default function PerformanceDashboard() {
 
   useEffect(() => {
     fetchPerformance();
+    // Auto-refresh every 60 seconds so charts update during the trading day
+    const interval = setInterval(fetchPerformance, 60_000);
+    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function handleRunBacktest() {
@@ -147,6 +154,11 @@ export default function PerformanceDashboard() {
         <div>
           <p className="panel-pretitle">System Performance</p>
           <h2 className="panel-title">Backtests, drawdowns, and strategy diagnostics</h2>
+          {lastRefreshed && (
+            <span style={{ fontSize: '0.75rem', opacity: 0.5, marginTop: '2px', display: 'block' }}>
+              Last refreshed: {lastRefreshed} • auto-updates every 60s
+            </span>
+          )}
         </div>
         <button className="run-btn" onClick={handleRunBacktest} disabled={runningBacktest}>
           {runningBacktest ? 'Running Backtest...' : 'Run Baseline Backtest'}

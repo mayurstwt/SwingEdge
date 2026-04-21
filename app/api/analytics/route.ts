@@ -1,8 +1,8 @@
-import { getSupabase } from '@/lib/supabase';
+import { getSupabaseAdmin } from '@/lib/supabase';
 import { buildLiveEquityCurve, calculateDrawdownCurve, summarizeStrategyPerformance } from '@/lib/trading/performance';
 
 export async function GET() {
-  const supabase = getSupabase();
+  const supabase = getSupabaseAdmin();
 
   try {
     const [{ data: trades, error }, { data: wallet }] = await Promise.all([

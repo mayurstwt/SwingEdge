@@ -88,7 +88,11 @@ export function getSupabase(): SupabaseClient {
 
 /**
  * 🔥 ADMIN CLIENT (for backend / API routes)
- * bypasses RLS → REQUIRED for trades + wallet
+ * Bypasses RLS → REQUIRED for trades + wallet writes in production.
+ *
+ * If SUPABASE_SERVICE_ROLE_KEY is not set (e.g. local dev without .env.local),
+ * falls back to the anon key with a warning instead of throwing a 500.
+ * Add SUPABASE_SERVICE_ROLE_KEY to your .env to get full write access.
  */
 export function getSupabaseAdmin(): SupabaseClient {
   if (_supabaseAdmin) return _supabaseAdmin;
@@ -96,8 +100,19 @@ export function getSupabaseAdmin(): SupabaseClient {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
 
-  if (!url || !serviceKey) {
-    throw new Error('❌ Supabase SERVICE ROLE key missing');
+  if (!url) {
+    throw new Error('❌ NEXT_PUBLIC_SUPABASE_URL is missing from .env');
+  }
+
+  if (!serviceKey) {
+    // Graceful fallback: warn loudly but don't crash the whole API route.
+    // Writes to RLS-protected tables will be rejected by Supabase, but reads will work.
+    console.warn(
+      '⚠️  SUPABASE_SERVICE_ROLE_KEY is not set. ' +
+      'Falling back to anon key — DB writes may be blocked by RLS. ' +
+      'Add the service role key from Supabase Dashboard → Project Settings → API → service_role.'
+    );
+    return getSupabase();
   }
 
   _supabaseAdmin = createClient(url, serviceKey);
