@@ -129,18 +129,22 @@ export function analyzeStock(
   let decision: "BUY" | "HOLD" | "AVOID";
   let reason = "";
 
-  if (score >= 60 && confidence >= 55) {
+  // README §3.1 — BUY threshold is immutably 70
+  if (score >= 75 && confidence >= 60) {
+    decision = "BUY";
+    reason = "Strong high-conviction setup";
+  } else if (score >= 70 && confidence >= 50) {
     decision = "BUY";
     reason = "Strong setup with confirmation";
   } else if (score >= 50) {
-    decision = "BUY"; // 🔥 key change (previously HOLD)
+    decision = "HOLD";
     reason = "Moderate setup (early entry)";
   } else if (score >= 35) {
     decision = "HOLD";
     reason = "Mixed signals";
   } else {
     decision = "AVOID";
-    reason = "Weak setup";
+    reason = "Weak technical setup";
   }
 
   const stopLoss = parseFloat((price - 1.5 * atr).toFixed(2));
