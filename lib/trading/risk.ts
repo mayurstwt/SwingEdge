@@ -2,7 +2,6 @@ import type {
   PositionSizingInput,
   PositionSizingResult,
   RiskTier,
-  StrategyPerformanceSnapshot,
 } from "@/lib/trading/types";
 
 // 🔥 Slightly more practical risk
@@ -16,58 +15,7 @@ export function getRiskPercent(riskTier: RiskTier): number {
   return RISK_PCT_BY_TIER[riskTier];
 }
 
-// 🔥 Less strict tier switching
-export function resolveRiskTier(recentWinRate: number, drawdownPct: number): RiskTier {
-  if (drawdownPct >= 12 || recentWinRate < 40) {
-    return "CONSERVATIVE";
-  }
-
-  if (recentWinRate >= 58 && drawdownPct <= 6) {
-    return "AGGRESSIVE";
-  }
-
-  return "NORMAL";
-}
-
-// 🔥 Relaxed threshold (more trades)
-export function computeDynamicScoreThreshold(
-  performance?: Pick<StrategyPerformanceSnapshot, "winRate" | "avgProfit" | "tradesCount">
-): number {
-  if (!performance || performance.tradesCount < 5) {
-    return 65;
-  }
-
-  if (performance.winRate < 40 && performance.avgProfit < 0) {
-    return 72;
-  }
-
-  if (performance.winRate > 60 && performance.avgProfit > 0) {
-    return 58;
-  }
-
-  if (performance.winRate > 55) {
-    return 60;
-  }
-
-  return 65;
-}
-
-// 🔥 Better weight distribution
-export function computeStrategyWeight(
-  performance?: Pick<StrategyPerformanceSnapshot, "winRate" | "avgProfit" | "tradesCount">
-): number {
-  if (!performance || performance.tradesCount < 5) {
-    return 1;
-  }
-
-  let weight = 1 + (performance.winRate - 50) / 120;
-
-  if (performance.avgProfit < 0) {
-    weight -= 0.1;
-  }
-
-  return Math.min(1.6, Math.max(0.7, Number(weight.toFixed(2))));
-}
+// removed dynamic thresholds
 
 // 🔥 MAIN FIX — Smart Position Sizing
 export function calculatePositionSize(input: PositionSizingInput): PositionSizingResult {

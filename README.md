@@ -6,7 +6,7 @@
 ---
 
 ## 1. System Overview
-SwingEdge is a high-frequency algorithmic swing trading terminal for the NSE (National Stock Exchange of India). It combines real-time technical analysis, automated paper trading, and strategy diagnostics into a single dashboard.
+SwingEdge is a high-frequency algorithmic swing trading terminal for the NSE (National Stock Exchange of India). It combines real-time technical analysis and automated paper trading into a single dashboard.
 
 ### Core Stack
 - **Framework**: Next.js 15+ (App Router)
@@ -63,17 +63,14 @@ The system must remain **Conservative**.
 | `signals` | Daily scan results | `symbol`, `score`, `decision`, `run_date` |
 | `trades` | Paper trading ledger | `buy_price`, `status` (OPEN/CLOSED), `pnl` |
 | `wallet` | Virtual bank | `balance`, `updated_at` |
-| `strategy_performance` | Adaptive optimization | `win_rate`, `capital_weight`, `enabled` |
-| `backtest_runs` | Simulation history | `final_equity`, `equity_curve`, `drawdown_curve` |
 
 ---
 
-## 5. Strategy Logic: "Adaptive Trader v2.0"
+## 5. Strategy Logic: "Static Trader v2.0"
 
-The system uses an **Adaptive Scoring** model:
+The system uses a **Static Scoring** model:
 1. **Indicator Weights**: Trend (SMA200) = 20pts, RSI = 20pts, MACD = 15pts, Volatility = -10pts (if high).
-2. **Dynamic Feedback**: The system reads `strategy_performance`. If the "PULLBACK" strategy is failing (Win Rate < 40%), it automatically lowers its `capital_weight` and increases its `score_threshold`.
-3. **Market Filter**: Analyzes `^NSEI` (NIFTY 50). If the broad market is in a `DOWNTREND`, it subtracts 10 points from all individual stock scores.
+2. **Market Filter**: Analyzes `^NSEI` (NIFTY 50). If the broad market is in a `DOWNTREND`, it subtracts 10 points from all individual stock scores.
 
 ---
 

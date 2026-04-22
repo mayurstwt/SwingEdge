@@ -82,63 +82,7 @@ CREATE TABLE IF NOT EXISTS ledger (
   created_at  timestamptz DEFAULT now()
 );
 
-CREATE TABLE IF NOT EXISTS strategy_performance (
-  entry_type               text PRIMARY KEY,
-  avg_profit               numeric(14, 2) DEFAULT 0.00,
-  win_rate                 numeric(6, 2) DEFAULT 0.00,
-  trades_count             integer DEFAULT 0,
-  total_profit             numeric(14, 2) DEFAULT 0.00,
-  dynamic_score_threshold  integer DEFAULT 70,
-  capital_weight           numeric(8, 2) DEFAULT 1.00,
-  enabled                  boolean DEFAULT true,
-  updated_at               timestamptz DEFAULT now()
-);
 
-CREATE TABLE IF NOT EXISTS backtest_runs (
-  id                uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-  name              text,
-  request_hash      text NOT NULL UNIQUE,
-  symbols           text[] NOT NULL,
-  start_date        date,
-  end_date          date,
-  initial_capital   numeric(14, 2) NOT NULL,
-  final_equity      numeric(14, 2) NOT NULL,
-  total_return_pct  numeric(8, 2) NOT NULL,
-  max_drawdown_pct  numeric(8, 2) NOT NULL,
-  win_rate          numeric(8, 2) NOT NULL,
-  avg_risk_reward   numeric(8, 2) NOT NULL,
-  total_trades      integer NOT NULL,
-  settings          jsonb NOT NULL DEFAULT '{}'::jsonb,
-  equity_curve      jsonb NOT NULL DEFAULT '[]'::jsonb,
-  drawdown_curve    jsonb NOT NULL DEFAULT '[]'::jsonb,
-  created_at        timestamptz DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS backtest_trades (
-  id                  uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-  run_id              uuid NOT NULL REFERENCES backtest_runs(id) ON DELETE CASCADE,
-  symbol              text NOT NULL,
-  short_name          text,
-  sector              text,
-  entry_date          date NOT NULL,
-  exit_date           date NOT NULL,
-  entry_price         numeric(12, 2) NOT NULL,
-  exit_price          numeric(12, 2) NOT NULL,
-  quantity            integer NOT NULL,
-  gross_pnl           numeric(14, 2) NOT NULL,
-  net_pnl             numeric(14, 2) NOT NULL,
-  exit_reason         text NOT NULL,
-  entry_type          text,
-  risk_reward         numeric(10, 2),
-  partial_exit_count  integer DEFAULT 0,
-  bars_held           integer DEFAULT 0,
-  strategy_score      integer,
-  risk_tier           text,
-  created_at          timestamptz DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS backtest_runs_created_at_idx ON backtest_runs(created_at DESC);
-CREATE INDEX IF NOT EXISTS backtest_trades_run_id_idx ON backtest_trades(run_id);
 
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS entry_type text;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS market_condition text;
@@ -161,15 +105,9 @@ ALTER TABLE trades      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE wallet      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE daily_stats ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ledger      ENABLE ROW LEVEL SECURITY;
-ALTER TABLE strategy_performance ENABLE ROW LEVEL SECURITY;
-ALTER TABLE backtest_runs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE backtest_trades ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "anon_full_signals"     ON signals     FOR ALL USING (true);
 CREATE POLICY "anon_full_trades"      ON trades      FOR ALL USING (true);
 CREATE POLICY "anon_full_wallet"      ON wallet      FOR ALL USING (true);
 CREATE POLICY "anon_full_daily_stats" ON daily_stats FOR ALL USING (true);
 CREATE POLICY "anon_full_ledger"      ON ledger      FOR ALL USING (true);
-CREATE POLICY "anon_full_strategy_performance" ON strategy_performance FOR ALL USING (true);
-CREATE POLICY "anon_full_backtest_runs" ON backtest_runs FOR ALL USING (true);
-CREATE POLICY "anon_full_backtest_trades" ON backtest_trades FOR ALL USING (true);

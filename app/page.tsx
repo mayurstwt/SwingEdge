@@ -7,7 +7,6 @@ import MarketOverview from './components/MarketOverview';
 import StockCard from './components/StockCard';
 import SignalsDashboard from './components/SignalsDashboard';
 import WalletPanel from './components/WalletPanel';
-import PerformanceDashboard from './components/performance/PerformanceDashboard';
 import type { AnalysisResult } from '@/lib/strategy';
 
 const PriceChart = dynamic(() => import('./components/PriceChart'), { ssr: false });
@@ -209,7 +208,6 @@ export default function Home() {
       {activeTab === 'signals' && (
         <section className="signals-tab-content" id="signals-tab-content">
           <SignalsDashboard onSelectStock={handleSignalSelect} />
-          <PerformanceDashboard />
           <WalletPanel />
         </section>
       )}

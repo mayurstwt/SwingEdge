@@ -14,11 +14,8 @@ import { getSupabaseAdmin, type TradeRow } from '@/lib/supabase';
 import { executeAutoBuy, executeAutoSell } from '@/lib/wallet';
 import STOCKS_DATA from '@/data/stocks.json';
 import { fetchHistoricalSeries } from '@/lib/trading/market-data';
-import { deriveStrategyContext } from '@/lib/trading/backtest';
-import { calculatePositionSize, resolveRiskTier } from '@/lib/trading/risk';
-import { buildLiveEquityCurve, calculateMaxDrawdownPct, summarizeStrategyPerformance } from '@/lib/trading/performance';
+import { calculatePositionSize } from '@/lib/trading/risk';
 import { calculateATR } from '@/lib/indicators';
-import type { StrategyPerformanceSnapshot, SimulatedTrade } from '@/lib/trading/types';
 
 const PRIORITY_STOCKS = STOCKS_DATA.slice(0, 20);
 
@@ -38,28 +35,7 @@ function scoreToDecision(score: number): 'BUY' | 'HOLD' | 'AVOID' {
   return 'AVOID';
 }
 
-function toPerformanceMap(
-  rows: Array<Record<string, unknown>>
-): Map<string, StrategyPerformanceSnapshot> {
-  return new Map(
-    rows.map((row) => {
-      const entryType = String(row.entry_type) as StrategyPerformanceSnapshot['entryType'];
-      return [
-        entryType,
-        {
-          entryType,
-          avgProfit:             Number(row.avg_profit              ?? 0),
-          winRate:               Number(row.win_rate                ?? 0),
-          tradesCount:           Number(row.trades_count            ?? 0),
-          totalProfit:           Number(row.total_profit            ?? 0),
-          dynamicScoreThreshold: Number(row.dynamic_score_threshold ?? 65),
-          capitalWeight:         Number(row.capital_weight          ?? 1),
-          enabled:               Boolean(row.enabled               ?? true),
-        },
-      ];
-    })
-  );
-}
+// removed toPerformanceMap
 
 // ── POST handler ─────────────────────────────────────────────────────────────
 export async function POST(req: Request) {
@@ -83,32 +59,17 @@ export async function POST(req: Request) {
     const [
       { data: wallet },
       { data: openTrades },
-      { data: closedTrades },
-      { data: strategyRows },
     ] = await Promise.all([
       supabase.from('wallet').select('balance').eq('id', 1).single(),
       supabase.from('trades').select('*').eq('status', 'OPEN'),
-      supabase.from('trades').select('*').eq('status', 'CLOSED').limit(100),
-      supabase.from('strategy_performance').select('*'),
     ]);
 
     let openTradeRows = (openTrades ?? []) as TradeRow[];
     let currentBalance = Number(wallet?.balance ?? 0);
-    const performanceMap = toPerformanceMap(strategyRows ?? []);
-
-    const recentClosed = (closedTrades ?? []) as TradeRow[];
-    const recentWinRate =
-      recentClosed.length === 0
-        ? 50
-        : (recentClosed.filter((t) => Number(t.profit_loss ?? 0) > 0).length /
-           recentClosed.length) * 100;
-
-    const equityCurve = buildLiveEquityCurve(recentClosed, 50000);
-    const liveDrawdown = calculateMaxDrawdownPct(equityCurve);
-    const riskTier = resolveRiskTier(recentWinRate, liveDrawdown);
+    const riskTier = 'NORMAL';
 
     results.logs.push(
-      `📊 Portfolio: balance=₹${currentBalance.toFixed(0)}, openTrades=${openTradeRows.length}, winRate=${recentWinRate.toFixed(1)}%, drawdown=${liveDrawdown.toFixed(1)}%, riskTier=${riskTier}`
+      `📊 Portfolio: balance=₹${currentBalance.toFixed(0)}, openTrades=${openTradeRows.length}, riskTier=${riskTier}`
     );
 
     // ── 2. NIFTY 50 market filter ───────────────────────────────────────────
@@ -224,44 +185,7 @@ export async function POST(req: Request) {
       openTradeRows = (refreshed ?? openTradeRows) as TradeRow[];
     }
 
-    // ── 4. Update adaptive strategy_performance table ──────────────────────
-    if (closedThisRun.length > 0) {
-      const { data: allClosed } = await supabase
-        .from('trades')
-        .select('*')
-        .eq('status', 'CLOSED')
-        .limit(200);
-
-      if (allClosed && allClosed.length > 0) {
-        // Map TradeRow → SimulatedTrade shape (only fields needed by summarizeStrategyPerformance)
-        const tradeLog: Array<Pick<SimulatedTrade, 'entryType' | 'netPnl' | 'riskReward'>> =
-          (allClosed as TradeRow[]).map((t) => ({
-            entryType: (t.entry_type ?? 'MOMENTUM') as SimulatedTrade['entryType'],
-            netPnl:    Number(t.profit_loss ?? 0),
-            riskReward: t.risk_reward ?? null,
-          }));
-
-        const snapshots = summarizeStrategyPerformance(tradeLog);
-
-        for (const snap of snapshots) {
-          await supabase.from('strategy_performance').upsert(
-            {
-              entry_type:              snap.entryType,
-              avg_profit:              snap.avgProfit,
-              win_rate:                snap.winRate,
-              trades_count:            snap.tradesCount,
-              total_profit:            snap.totalProfit,
-              dynamic_score_threshold: snap.dynamicScoreThreshold,
-              capital_weight:          snap.capitalWeight,
-              enabled:                 snap.enabled,
-              updated_at:              new Date().toISOString(),
-            },
-            { onConflict: 'entry_type' }
-          );
-        }
-        results.logs.push(`🧠 Adaptive: updated strategy_performance for ${snapshots.length} entry types`);
-      }
-    }
+    // Removed adaptive strategy updates
 
     // ── 5. Scan for new entry signals ───────────────────────────────────────
     const signalsToUpsert: Array<Record<string, unknown>> = [];
@@ -280,7 +204,6 @@ export async function POST(req: Request) {
         );
 
         const latestCandle = candles[candles.length - 1];
-        const context = deriveStrategyContext(analysis, performanceMap);
 
         // Adjusted confidence score — build adjustment explanation for the reason field
         const rawScore = analysis.score;
@@ -352,7 +275,7 @@ export async function POST(req: Request) {
           price:           latestCandle.close,
           stopLoss:        analysis.stopLoss,
           riskTier,
-          strategyWeight:  context.strategyWeight,
+          strategyWeight:  1,
           capitalLimitPct: MAX_CAPITAL_USAGE - capitalUsagePct,
         });
 
@@ -371,11 +294,11 @@ export async function POST(req: Request) {
           stockInfo.sector,
           {
             quantity:        sizing.quantity,
-            entryType:       context.entryType,
-            marketCondition: context.marketCondition,
-            volumeStrength:  context.volumeStrength,
+            entryType:       analysis.trend === 'UPTREND' ? 'PULLBACK' : 'MOMENTUM',
+            marketCondition: marketBullish ? 'BULLISH' : 'BEARISH',
+            volumeStrength:  analysis.volumeRatio > 1.2 ? 'HIGH' : 'NORMAL',
             riskReward:      analysis.riskReward,
-            strategyWeight:  context.strategyWeight,
+            strategyWeight:  1,
             riskTier,
             entryScore:      confidenceScore,
           }
