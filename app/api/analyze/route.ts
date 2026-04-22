@@ -1,30 +1,16 @@
-import axios from "axios";
-import { analyzeStock } from "@/lib/strategy";
-
+import { analyzeStock } from '@/lib/strategy';
+import { fetchYahooChart } from '@/lib/yahoo-finance';
+import { fetchHistoricalSeries } from '@/lib/trading/market-data';
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const symbol = searchParams.get("symbol");
+  const symbol = searchParams.get('symbol');
 
   if (!symbol) {
-    return Response.json({ error: "Symbol is required" }, { status: 400 });
+    return Response.json({ error: 'Symbol is required' }, { status: 400 });
   }
 
   try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1y&interval=1d&events=div,splits`;
-
-    const res = await axios.get(url, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-        Accept: "application/json",
-      },
-      timeout: 15000,
-    });
-
-    const result = res.data?.chart?.result?.[0];
-    if (!result) {
-      return Response.json({ error: "No data returned for this symbol" }, { status: 404 });
-    }
+    const result = await fetchYahooChart(symbol, '1y', '1d', 12000, 2);
 
     const timestamps: number[] = result.timestamp ?? [];
     const quote = result.indicators?.quote?.[0] ?? {};
@@ -53,7 +39,7 @@ export async function GET(req: Request) {
 
     if (rows.length < 30) {
       return Response.json(
-        { error: "Not enough historical data (need at least 30 trading days)" },
+        { error: 'Not enough historical data (need at least 30 trading days)' },
         { status: 422 }
       );
     }
@@ -66,25 +52,57 @@ export async function GET(req: Request) {
     const meta = result.meta ?? {};
     const analysis = analyzeStock(closes, highs, lows, volumes);
 
-    return Response.json({
-      symbol: meta.symbol ?? symbol,
-      shortName: meta.shortName ?? symbol,
-      currency: meta.currency ?? "INR",
-      exchange: meta.exchangeName ?? "NSE",
-      ...analysis,
-    });
-  } catch (err: unknown) {
-    console.error("[analyze] Error:", err);
+    // Apply market filter to match run-strategy logic
+    let marketBullish = true;
+    try {
+      const niftySeries = await fetchHistoricalSeries('^NSEI', { range: '1y' });
+      const niftyAnalysis = analyzeStock(
+        niftySeries.candles.map((c) => c.close),
+        niftySeries.candles.map((c) => c.high),
+        niftySeries.candles.map((c) => c.low),
+        niftySeries.candles.map((c) => c.volume)
+      );
+      marketBullish = niftyAnalysis.trend === 'UPTREND';
+    } catch {
+      // ignore
+    }
 
-    if (axios.isAxiosError(err)) {
-      if (err.response?.status === 404) {
-        return Response.json({ error: "Stock symbol not found" }, { status: 404 });
-      }
-      if (err.code === "ECONNABORTED") {
-        return Response.json({ error: "Request timed out. Try again." }, { status: 504 });
+    if (!marketBullish) {
+      analysis.score = Math.max(0, analysis.score - 10);
+      analysis.reason += ' [raw score −10 (bear mkt)]';
+      // Re-evaluate decision
+      if (analysis.score >= 70) {
+        analysis.decision = 'BUY';
+      } else if (analysis.score >= 50) {
+        analysis.decision = 'HOLD';
+      } else {
+        analysis.decision = 'AVOID';
       }
     }
 
-    return Response.json({ error: "Failed to fetch stock data. Try again later." }, { status: 500 });
+    return Response.json({
+      symbol: meta.symbol ?? symbol,
+      shortName: meta.shortName ?? symbol,
+      currency: meta.currency ?? 'INR',
+      exchange: meta.exchangeName ?? 'NSE',
+      ...analysis,
+    });
+  } catch (err: unknown) {
+    console.error('[analyze] Error:', err);
+
+    const message = err instanceof Error ? err.message : 'Failed to fetch stock data';
+
+    if (message.includes('No chart data') || message.includes('HTTP 404')) {
+      return Response.json({ error: 'Stock symbol not found' }, { status: 404 });
+    }
+
+    if (err instanceof Error && err.name === 'AbortError') {
+      return Response.json({ error: 'Yahoo Finance timed out — please try again.' }, { status: 504 });
+    }
+
+    return Response.json(
+      { error: `${message}. Try again in a moment.` },
+      { status: 500 }
+    );
   }
 }

@@ -1827,6 +1827,18 @@ body {
   border-radius: 10px;
   color: var(--accent-red);
   font-size: 0.85rem;
+  margin-bottom: 16px;
+}
+
+.dash-info-note {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  background: rgba(0, 212, 255, 0.04);
+  border: 1px solid rgba(0, 212, 255, 0.12);
+  border-radius: 8px;
+  padding: 8px 14px;
+  margin-bottom: 16px;
+  line-height: 1.5;
 }
 
 .dash-empty {

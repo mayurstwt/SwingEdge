@@ -282,19 +282,25 @@ export async function POST(req: Request) {
         const latestCandle = candles[candles.length - 1];
         const context = deriveStrategyContext(analysis, performanceMap);
 
-        // Adjusted confidence score
-        let confidenceScore = analysis.score;
-        if (!marketBullish && !bypassMarketFilter) confidenceScore -= 10;
-        if (context.volumeStrength === 'WEAK')     confidenceScore -= 5;
+        // Adjusted confidence score — build adjustment explanation for the reason field
+        const rawScore = analysis.score;
+        let confidenceScore = rawScore;
+        const adjustments: string[] = [];
+
+        if (!marketBullish && !bypassMarketFilter) {
+          confidenceScore -= 10;
+          adjustments.push('−10 (bear mkt)');
+        }
         confidenceScore = Math.max(0, confidenceScore);
 
         // README §3.1 — single source of truth for decision label
         const displayDecision = scoreToDecision(confidenceScore);
 
+        const adjustmentStr = adjustments.length > 0 ? ` [raw ${rawScore}${adjustments.join('')}]` : '';
         const signalReason =
           displayDecision === 'BUY'
-            ? analysis.reason
-            : `${analysis.reason} — score ${confidenceScore} (need ≥${MIN_BUY_SCORE} to BUY)`;
+            ? `${analysis.reason}${adjustmentStr}`
+            : `${analysis.reason} — score ${confidenceScore}${adjustmentStr} (need ≥${MIN_BUY_SCORE} to B...)`;
 
         signalsToUpsert.push({
           symbol:     stockInfo.symbol,
@@ -307,14 +313,14 @@ export async function POST(req: Request) {
           target:     analysis.target,
           rsi:        analysis.rsi,
           trend:      analysis.trend,
-          change_pct: analysis.changePercent, // ✅ correct field name
+          change_pct: analysis.changePercent,
           reason:     signalReason,
           run_date:   todayStr,
           updated_at: new Date().toISOString(),
         });
 
         results.processed++;
-        results.logs.push(`${stockInfo.symbol}: score=${confidenceScore} → ${displayDecision}`);
+        results.logs.push(`${stockInfo.symbol}: raw=${rawScore} → adjusted=${confidenceScore} → ${displayDecision}`);
 
         // ── 6. Execute auto-buy if conditions are met ──────────────────────
         const existingTrade = openTradeRows.find((t) => t.symbol === stockInfo.symbol);

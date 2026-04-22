@@ -104,6 +104,10 @@ export default function SignalsDashboard({ onSelectStock }: SignalsDashboardProp
         </div>
       </div>
 
+      <div className="dash-info-note">
+        ℹ️ Signal scores are adjusted for market conditions (−10 if NIFTY bearish). Click any row to see the detailed breakdown.
+      </div>
+
       {error && (
         <div className="dash-error slide-in">
           <span>⚠ {error}</span>

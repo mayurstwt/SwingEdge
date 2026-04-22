@@ -5,7 +5,11 @@ import { fetchHistoricalSeries, sanitizeHistoricalSeries } from '@/lib/trading/m
 import { runBacktest } from '@/lib/trading/backtest';
 import type { BacktestRequestPayload } from '@/lib/trading/types';
 
+// Allow up to 5 minutes for the backtest route (Netlify/Vercel edge)
+export const maxDuration = 300;
+
 const DEFAULT_SYMBOLS = STOCKS_DATA.slice(0, 20).map((stock) => stock.symbol);
+
 
 function stableHash(payload: Record<string, unknown>): string {
   return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
@@ -106,9 +110,19 @@ export async function POST(req: Request) {
       }
     }
 
-    const rawHistoricalData = body.historicalData && body.historicalData.length > 0
-      ? sanitizeHistoricalSeries(body.historicalData)
-      : sanitizeHistoricalSeries(await Promise.all(symbols.map((symbol) => fetchHistoricalSeries(symbol, { range: '3y' }))));
+    let rawHistoricalData: Awaited<ReturnType<typeof sanitizeHistoricalSeries>>;
+    if (body.historicalData && body.historicalData.length > 0) {
+      rawHistoricalData = sanitizeHistoricalSeries(body.historicalData);
+    } else {
+      // Fetch in parallel but don't let one failure kill the whole backtest
+      const settled = await Promise.allSettled(
+        symbols.map((symbol) => fetchHistoricalSeries(symbol, { range: '2y' }))
+      );
+      const succeeded = settled
+        .filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof fetchHistoricalSeries>>> => r.status === 'fulfilled')
+        .map((r) => r.value);
+      rawHistoricalData = sanitizeHistoricalSeries(succeeded);
+    }
     const historicalData = filterSeriesByDate(rawHistoricalData, body.startDate, body.endDate);
 
     if (historicalData.length === 0) {

@@ -117,19 +117,29 @@ export default function WalletPanel() {
 
     // Add today's row with open-trade unrealized P&L even if no closes yet
     const todayDate = new Date().toISOString().slice(0, 10);
-    const openUnrealizedToday = openTrades
-      .filter((t) => t.opened_at?.slice(0, 10) === todayDate)
-      .reduce((sum, t) => {
-        const cp = signalMap.get(t.symbol.trim());
-        return sum + (cp ? (cp - t.buy_price) * t.quantity : 0);
-      }, 0);
+
+    // Detect trades opened today — compare date prefix tolerantly
+    const tradesOpenedToday = openTrades.filter((t) => {
+      const d = t.opened_at ? t.opened_at.slice(0, 10) : '';
+      return d === todayDate;
+    });
+
+    const openUnrealizedToday = tradesOpenedToday.reduce((sum, t) => {
+      const cp = signalMap.get(t.symbol.trim());
+      return sum + (cp ? (cp - t.buy_price) * t.quantity : 0);
+    }, 0);
 
     const todayRow = closedByDate.find((r) => r.date === todayDate);
     if (todayRow) {
-      // annotate that unrealized is included
       todayRow.pnl += openUnrealizedToday;
-    } else if (openUnrealizedToday !== 0 || openTrades.some((t) => t.opened_at?.slice(0, 10) === todayDate)) {
-      closedByDate.push({ date: todayDate, pnl: openUnrealizedToday, trades: 0 });
+    } else {
+      // Always show today if: any trades closed today, or any trades opened today
+      const hasActivity =
+        tradesOpenedToday.length > 0 ||
+        closedTrades.some((t) => (t.closed_at ?? t.opened_at).slice(0, 10) === todayDate);
+      if (hasActivity) {
+        closedByDate.push({ date: todayDate, pnl: openUnrealizedToday, trades: 0 });
+      }
     }
 
     return closedByDate.sort((a, b) => b.date.localeCompare(a.date));

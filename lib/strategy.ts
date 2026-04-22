@@ -136,12 +136,12 @@ export function analyzeStock(
   } else if (score >= 70 && confidence >= 50) {
     decision = "BUY";
     reason = "Strong setup with confirmation";
+  } else if (score >= 70) {
+    decision = "BUY";
+    reason = "Setup meets threshold, but low confidence";
   } else if (score >= 50) {
     decision = "HOLD";
     reason = "Moderate setup (early entry)";
-  } else if (score >= 35) {
-    decision = "HOLD";
-    reason = "Mixed signals";
   } else {
     decision = "AVOID";
     reason = "Weak technical setup";
