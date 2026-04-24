@@ -56,12 +56,20 @@ export async function GET(req: Request) {
     let marketBullish = true;
     try {
       const niftySeries = await fetchHistoricalSeries('^NSEI', { range: '1y' });
-      const niftyAnalysis = analyzeStock(
-        niftySeries.candles.map((c) => c.close),
-        niftySeries.candles.map((c) => c.high),
-        niftySeries.candles.map((c) => c.low),
-        niftySeries.candles.map((c) => c.volume)
-      );
+      type Candle = {
+  close: number;
+  high: number;
+  low: number;
+  volume: number;
+};
+
+const candles = niftySeries.candles as Candle[];
+
+const closes = candles.map((c: Candle) => c.close);
+
+const niftyAnalysis = analyzeStock(closes);
+
+
       marketBullish = niftyAnalysis.trend === 'UPTREND';
     } catch {
       // ignore
