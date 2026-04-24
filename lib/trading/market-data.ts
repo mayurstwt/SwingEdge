@@ -33,6 +33,26 @@ export function getStockMeta(symbol: string): { shortName: string; sector: strin
   };
 }
 
+
+export async function getMarketData(symbol: string): Promise<number[]> {
+  try {
+    const queryOptions = {
+      period1: "2024-01-01",
+      interval: "1d",
+    };
+
+    const result = await yahooFinance.historical(symbol + ".NS", queryOptions);
+
+    if (!result || result.length === 0) return [];
+
+    return result.map((item) => item.close).filter(Boolean);
+  } catch (err) {
+    console.error("Market data error:", err);
+    return [];
+  }
+}
+
+
 export async function fetchHistoricalSeries(
   symbol: string,
   options?: { range?: string; interval?: string }
