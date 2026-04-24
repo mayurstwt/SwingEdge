@@ -1,13 +1,17 @@
-import { supabase } from "./supabase";
-import { Trade, TradeDirection } from "./trading/types";
+import { getSupabaseAdmin } from "./supabase";
+import { getMarketDataFull } from "./trading/market-data";
+import type { TradeDirection } from "./trading/types";
 
 // ================================
 // 💰 GET WALLET
 // ================================
 export async function getWallet() {
+  const supabase = getSupabaseAdmin();
+  
   const { data, error } = await supabase
     .from("wallet")
     .select("*")
+    .eq("id", 1)
     .single();
 
   if (error) {
@@ -15,7 +19,7 @@ export async function getWallet() {
     return null;
   }
 
-  return data;
+  return data as { id: number; balance: number; updated_at: string };
 }
 
 // ================================
@@ -26,6 +30,8 @@ export async function updateWallet({
 }: {
   balance: number;
 }) {
+  const supabase = getSupabaseAdmin();
+  
   const { error } = await supabase
     .from("wallet")
     .update({
@@ -36,6 +42,7 @@ export async function updateWallet({
 
   if (error) {
     console.error("Wallet update error:", error);
+    throw new Error(`Wallet update failed: ${error.message}`);
   }
 }
 
@@ -47,7 +54,7 @@ export function calculatePnL(
   entryPrice: number,
   exitPrice: number,
   quantity: number
-) {
+): number {
   if (direction === "LONG") {
     return (exitPrice - entryPrice) * quantity;
   }
@@ -60,12 +67,33 @@ export function calculatePnL(
 }
 
 // ================================
-// 🔁 CLOSE TRADE
+// 💸 CALCULATE CHARGES (BROKERAGE SIMULATION)
+// ================================
+export function calculateCharges(
+  tradeValue: number,
+  type: "buy" | "sell"
+): number {
+  // Basic Indian brokerage approximation
+  const brokerage = Math.min(20, tradeValue * 0.0003); // 0.03% or ₹20 max
+  const stt = type === "sell" ? tradeValue * 0.001 : 0; // STT on sell only
+  const transactionCharges = tradeValue * 0.0000325;
+  const gst = (brokerage + transactionCharges) * 0.18;
+
+  const totalCharges = brokerage + stt + transactionCharges + gst;
+
+  return Number(totalCharges.toFixed(2));
+}
+
+// ================================
+// 🔁 CLOSE TRADE (with live price)
 // ================================
 export async function closeTrade(
   tradeId: string,
-  exitPrice: number
+  exitPrice: number,
+  reason: string = "manual"
 ) {
+  const supabase = getSupabaseAdmin();
+  
   // 1. Fetch trade
   const { data: trade, error } = await supabase
     .from("trades")
@@ -75,93 +103,215 @@ export async function closeTrade(
 
   if (error || !trade) {
     console.error("Trade not found:", error);
-    return;
+    throw new Error("Trade not found");
+  }
+
+  if (trade.status === "CLOSED") {
+    throw new Error("Trade already closed");
   }
 
   // 2. Calculate PnL
-  const pnl = calculatePnL(
-    trade.direction,
+  const rawPnl = calculatePnL(
+    (trade.direction as TradeDirection) || "LONG",
     trade.entry_price,
     exitPrice,
     trade.quantity
   );
 
-  // 3. Update trade
-  await supabase
+  // 3. Calculate sell charges
+  const sellValue = exitPrice * trade.quantity;
+  const sellCharges = calculateCharges(sellValue, "sell");
+  const totalCharges = Number(trade.charges || 0) + sellCharges;
+
+  // 4. Net PnL after charges
+  const netPnL = rawPnl - sellCharges;
+
+  // 5. Update trade with BOTH pnl and profit_loss for compatibility
+  const { error: updateError } = await supabase
     .from("trades")
     .update({
       exit_price: exitPrice,
-      pnl,
+      sell_price: exitPrice,
+      pnl: netPnL,
+      profit_loss: netPnL,
+      charges: totalCharges,
       status: "CLOSED",
       closed_at: new Date().toISOString(),
+      reason: trade.reason ? `${trade.reason}, ${reason}` : reason,
     })
     .eq("id", tradeId);
 
-  // 4. Update wallet
+  if (updateError) {
+    console.error("Trade close error:", updateError);
+    throw new Error(`Failed to close trade: ${updateError.message}`);
+  }
+
+  // 6. Update wallet with proceeds
   const wallet = await getWallet();
+  if (!wallet) {
+    throw new Error("Wallet not found");
+  }
 
-  if (!wallet) return;
+  // Add back: sell proceeds minus charges
+  const proceeds = sellValue - sellCharges;
+  const newBalance = wallet.balance + proceeds;
 
-  const newBalance = wallet.balance + pnl;
+  await updateWallet({ balance: newBalance });
 
-  await updateWallet({
-    balance: newBalance,
+  // 7. Add ledger entry for transparency
+  await supabase.from("ledger").insert({
+    type: netPnL >= 0 ? "CREDIT" : "DEBIT",
+    amount: Math.abs(netPnL),
+    description: `Trade ${netPnL >= 0 ? "profit" : "loss"}: ${trade.symbol} (${reason})`,
   });
+
+  return {
+    tradeId,
+    symbol: trade.symbol,
+    rawPnl,
+    netPnL,
+    sellCharges,
+    totalCharges,
+    newBalance,
+  };
 }
 
 // ================================
-// 🔍 CHECK EXIT CONDITIONS
+// 🔍 CHECK EXIT CONDITIONS (with LIVE prices)
 // ================================
 export async function checkAndCloseTrades() {
-  const { data: openTrades } = await supabase
+  const supabase = getSupabaseAdmin();
+  
+  const { data: openTrades, error } = await supabase
     .from("trades")
     .select("*")
     .eq("status", "OPEN");
 
-  if (!openTrades) return;
+  if (error) {
+    console.error("Fetch open trades error:", error);
+    return [];
+  }
+
+  if (!openTrades || openTrades.length === 0) return [];
+
+  const closedTrades = [];
 
   for (const trade of openTrades) {
-    const currentPrice = trade.entry_price; // ⚠️ replace with live price if needed
+    try {
+      // Fetch LIVE market data
+      const { closes } = await getMarketDataFull(trade.symbol, {
+        range: '5d',
+        interval: '1d',
+      });
 
-    // LONG EXIT
-    if (trade.direction === "LONG") {
-      if (currentPrice <= trade.stop_loss) {
-        await closeTrade(trade.id, currentPrice);
+      if (!closes || closes.length === 0) {
+        console.warn(`No market data for ${trade.symbol}, skipping exit check`);
+        continue;
       }
 
-      if (currentPrice >= trade.target) {
-        await closeTrade(trade.id, currentPrice);
-      }
-    }
+      const currentPrice = closes[closes.length - 1];
 
-    // SHORT EXIT
-    if (trade.direction === "SHORT") {
-      if (currentPrice >= trade.stop_loss) {
-        await closeTrade(trade.id, currentPrice);
+      // Update highest price for trailing stop calculation
+      if (trade.direction === "LONG" && currentPrice > (trade.highest_price || 0)) {
+        await supabase
+          .from("trades")
+          .update({ highest_price: currentPrice })
+          .eq("id", trade.id);
       }
 
-      if (currentPrice <= trade.target) {
-        await closeTrade(trade.id, currentPrice);
+      let shouldClose = false;
+      let closeReason = "";
+
+      // LONG EXIT LOGIC
+      if (trade.direction === "LONG" || !trade.direction) {
+        // Target hit
+        if (trade.target && currentPrice >= trade.target) {
+          shouldClose = true;
+          closeReason = "target hit";
+        }
+        // Trailing stop: 1.5x ATR from highest price
+        else if (trade.highest_price && trade.initial_stop_loss) {
+          const atr = (trade.target - trade.entry_price) / 2.2; // Reverse engineer ATR
+          const trailingStop = trade.highest_price - (1.5 * atr);
+          
+          if (currentPrice <= trailingStop && currentPrice < trade.highest_price) {
+            shouldClose = true;
+            closeReason = "trailing stop";
+          }
+        }
+        // Initial stop loss
+        else if (trade.stop_loss && currentPrice <= trade.stop_loss) {
+          shouldClose = true;
+          closeReason = "stop loss";
+        }
       }
+
+      // SHORT EXIT LOGIC
+      if (trade.direction === "SHORT") {
+        if (trade.target && currentPrice <= trade.target) {
+          shouldClose = true;
+          closeReason = "target hit";
+        } else if (trade.stop_loss && currentPrice >= trade.stop_loss) {
+          shouldClose = true;
+          closeReason = "stop loss";
+        }
+      }
+
+      if (shouldClose) {
+        const result = await closeTrade(trade.id, currentPrice, closeReason);
+        closedTrades.push(result);
+        console.log(`Auto-closed ${trade.symbol} at ₹${currentPrice} (${closeReason})`);
+      }
+    } catch (err) {
+      console.error(`Exit check failed for ${trade.symbol}:`, err);
     }
   }
+
+  return closedTrades;
 }
 
 // ================================
-// 💸 CALCULATE CHARGES (BROKERAGE SIMULATION)
+// 🏦 DEPOSIT / WITHDRAW HELPERS
 // ================================
-export function calculateCharges(
-  tradeValue: number,
-  type: "buy" | "sell"
-): number {
-  // Basic Indian brokerage approximation
+export async function deposit(amount: number, description: string = "Cash Deposit") {
+  if (amount <= 0) throw new Error("Invalid deposit amount");
 
-  const brokerage = Math.min(20, tradeValue * 0.0003); // 0.03% or ₹20 max
-  const stt = type === "sell" ? tradeValue * 0.001 : 0; // STT on sell
-  const transactionCharges = tradeValue * 0.0000325;
-  const gst = (brokerage + transactionCharges) * 0.18;
+  const wallet = await getWallet();
+  if (!wallet) throw new Error("Wallet not found");
 
-  const totalCharges = brokerage + stt + transactionCharges + gst;
+  const supabase = getSupabaseAdmin();
+  const newBalance = wallet.balance + amount;
 
-  return Number(totalCharges.toFixed(2));
+  await Promise.all([
+    updateWallet({ balance: newBalance }),
+    supabase.from("ledger").insert({
+      type: "CREDIT",
+      amount,
+      description,
+    }),
+  ]);
+
+  return newBalance;
+}
+
+export async function withdraw(amount: number, description: string = "Cash Withdrawal") {
+  if (amount <= 0) throw new Error("Invalid withdrawal amount");
+
+  const wallet = await getWallet();
+  if (!wallet) throw new Error("Wallet not found");
+  if (wallet.balance < amount) throw new Error("Insufficient funds");
+
+  const supabase = getSupabaseAdmin();
+  const newBalance = wallet.balance - amount;
+
+  await Promise.all([
+    updateWallet({ balance: newBalance }),
+    supabase.from("ledger").insert({
+      type: "DEBIT",
+      amount,
+      description,
+    }),
+  ]);
+
+  return newBalance;
 }
