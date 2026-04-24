@@ -146,3 +146,22 @@ export async function checkAndCloseTrades() {
     }
   }
 }
+
+// ================================
+// 💸 CALCULATE CHARGES (BROKERAGE SIMULATION)
+// ================================
+export function calculateCharges(
+  tradeValue: number,
+  type: "buy" | "sell"
+): number {
+  // Basic Indian brokerage approximation
+
+  const brokerage = Math.min(20, tradeValue * 0.0003); // 0.03% or ₹20 max
+  const stt = type === "sell" ? tradeValue * 0.001 : 0; // STT on sell
+  const transactionCharges = tradeValue * 0.0000325;
+  const gst = (brokerage + transactionCharges) * 0.18;
+
+  const totalCharges = brokerage + stt + transactionCharges + gst;
+
+  return Number(totalCharges.toFixed(2));
+}
