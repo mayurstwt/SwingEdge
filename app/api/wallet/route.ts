@@ -1,222 +1,44 @@
-import { getSupabase, getSupabaseAdmin } from '@/lib/supabase';
-import { calculateCharges } from '@/lib/wallet';
+import { getSupabase } from '@/lib/supabase';
 
-// ================================
-// 📊 GET WALLET DATA
-// ================================
 export async function GET() {
   try {
     const supabase = getSupabase();
 
-    const { data: latestRun } = await supabase
-      .from('signals')
-      .select('run_date')
-      .order('run_date', { ascending: false })
-      .limit(1)
-      .single();
+    const { data: trades } = await supabase
+      .from('trades')
+      .select('*')
+      .eq('status', 'CLOSED');
 
-    const [walletRes, tradesRes, ledgerRes, signalsRes] = await Promise.all([
-      supabase.from('wallet').select('*').eq('id', 1).single(),
-      supabase.from('trades').select('*').order('opened_at', { ascending: false }),
-      supabase.from('ledger').select('*').order('created_at', { ascending: false }),
-      latestRun
-        ? supabase.from('signals').select('symbol, price').eq('run_date', latestRun.run_date)
-        : Promise.resolve({ data: [] }),
-    ]);
-
-    return Response.json({
-      balance: walletRes.data?.balance ?? 0,
-      trades: tradesRes.data ?? [],
-      ledger: ledgerRes.data ?? [],
-      signals: signalsRes.data ?? [],
-    });
-  } catch {
-    return Response.json({ error: 'DB Connection Error' }, { status: 500 });
-  }
-}
-
-// ================================
-// ⚙️ WALLET ACTIONS
-// ================================
-export async function POST(req: Request) {
-  try {
-    const supabase = getSupabaseAdmin();
-    const body = await req.json();
-    const { action } = body;
-
-    // ================================
-    // 💰 DEPOSIT
-    // ================================
-    if (action === 'deposit') {
-      const { amount } = body;
-
-      if (!amount || amount <= 0) {
-        return Response.json({ error: 'Invalid amount' }, { status: 400 });
-      }
-
-      const { data: wallet } = await supabase
-        .from('wallet')
-        .select('balance')
-        .eq('id', 1)
-        .single();
-
-      const newBalance = (wallet?.balance ?? 0) + amount;
-
-      await Promise.all([
-        supabase.from('wallet').update({
-          balance: newBalance,
-          updated_at: new Date().toISOString(),
-        }).eq('id', 1),
-
-        supabase.from('ledger').insert({
-          type: 'CREDIT',
-          amount,
-          description: 'Cash Deposit',
-        }),
-      ]);
-
-      return Response.json({ success: true, balance: newBalance });
-    }
-
-    // ================================
-    // 💸 WITHDRAW
-    // ================================
-    if (action === 'withdraw') {
-      const { amount } = body;
-
-      if (!amount || amount <= 0) {
-        return Response.json({ error: 'Invalid amount' }, { status: 400 });
-      }
-
-      const { data: wallet } = await supabase
-        .from('wallet')
-        .select('balance')
-        .eq('id', 1)
-        .single();
-
-      const currentBalance = wallet?.balance ?? 0;
-
-      if (currentBalance < amount) {
-        return Response.json({ error: 'Insufficient funds' }, { status: 400 });
-      }
-
-      const newBalance = currentBalance - amount;
-
-      await Promise.all([
-        supabase.from('wallet').update({
-          balance: newBalance,
-          updated_at: new Date().toISOString(),
-        }).eq('id', 1),
-
-        supabase.from('ledger').insert({
-          type: 'DEBIT',
-          amount,
-          description: 'Cash Withdrawal',
-        }),
-      ]);
-
-      return Response.json({ success: true, balance: newBalance });
-    }
-
-    // ================================
-    // 📈 OPEN TRADE
-    // ================================
-    if (action === 'open') {
-      const { symbol, short_name, buy_price, quantity = 1 } = body;
-
-      const tradeValue = buy_price * quantity;
-      const charges = calculateCharges(tradeValue, 'buy');
-      const totalCost = tradeValue + charges;
-
-      const { data: wallet } = await supabase
-        .from('wallet')
-        .select('balance')
-        .eq('id', 1)
-        .single();
-
-      const currentBalance = wallet?.balance ?? 0;
-
-      if (currentBalance < totalCost) {
-        return Response.json({
-          error: `Need ₹${totalCost.toFixed(2)} (₹${charges} charges). Balance: ₹${currentBalance.toFixed(2)}`,
-        }, { status: 400 });
-      }
-
-      await Promise.all([
-        supabase.from('trades').insert({
-          symbol,
-          short_name: short_name ?? symbol,
-          buy_price,
-          quantity,
-          charges,
-          status: 'OPEN',
-        }),
-
-        supabase.from('wallet').update({
-          balance: currentBalance - totalCost,
-          updated_at: new Date().toISOString(),
-        }).eq('id', 1),
-      ]);
-
-      return Response.json({ success: true, charges });
-    }
-
-    // ================================
-    // 📉 CLOSE TRADE
-    // ================================
-    if (action === 'close') {
-      const { trade_id, sell_price } = body;
-
-      const { data: trade } = await supabase
-        .from('trades')
-        .select('*')
-        .eq('id', trade_id)
-        .single();
-
-      if (!trade || trade.status === 'CLOSED') {
-        return Response.json({ error: 'Invalid trade' }, { status: 400 });
-      }
-
-      const sellValue = sell_price * trade.quantity;
-      const sellCharges = calculateCharges(sellValue, 'sell');
-
-      const proceeds = sellValue - sellCharges;
-      const totalCharges = Number(trade.charges) + sellCharges;
-
-      const profit_loss = proceeds - (trade.buy_price * trade.quantity);
-
-      const { data: wallet } = await supabase
-        .from('wallet')
-        .select('balance')
-        .eq('id', 1)
-        .single();
-
-      await Promise.all([
-        supabase.from('trades').update({
-          sell_price,
-          status: 'CLOSED',
-          charges: totalCharges,
-          profit_loss,
-          closed_at: new Date().toISOString(),
-        }).eq('id', trade_id),
-
-        supabase.from('wallet').update({
-          balance: (wallet?.balance ?? 0) + proceeds,
-          updated_at: new Date().toISOString(),
-        }).eq('id', 1),
-      ]);
-
+    const closedTrades = trades ?? [];
+    
+    if (closedTrades.length === 0) {
       return Response.json({
-        success: true,
-        profit_loss,
-        sellCharges,
+        winRate: 0,
+        totalTrades: 0,
+        avgProfit: 0,
+        bestTrade: 0,
+        worstTrade: 0,
       });
     }
 
-    return Response.json({ error: 'Invalid action' }, { status: 400 });
+    const profits = closedTrades.map(t => Number(t.profit_loss ?? 0));
+    const winningTrades = profits.filter(p => p > 0);
+    const losingTrades = profits.filter(p => p <= 0);
 
+    const winRate = Math.round((winningTrades.length / profits.length) * 100);
+    const avgProfit = profits.reduce((a, b) => a + b, 0) / profits.length;
+    const bestTrade = Math.max(...profits);
+    const worstTrade = Math.min(...profits);
+
+    return Response.json({
+      winRate,
+      totalTrades: profits.length,
+      avgProfit: Number(avgProfit.toFixed(2)),
+      bestTrade: Number(bestTrade.toFixed(2)),
+      worstTrade: Number(worstTrade.toFixed(2)),
+    });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Wallet operation failed';
+    const message = err instanceof Error ? err.message : 'Analytics failed';
     return Response.json({ error: message }, { status: 500 });
   }
 }
