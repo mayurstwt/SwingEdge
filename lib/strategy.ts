@@ -1,193 +1,167 @@
-import {
-  calculateSMA,
-  calculateRSI,
-  calculateMACD,
-  calculateBollingerBands,
-  calculateATR,
-  calculateVolumeRatio,
-} from "./indicators";
+import { calculateRSI, calculateSMA, calculateMACD, calculateATR } from "./indicators";
 
-export const STRATEGY_VERSION = "2.0 (Adaptive Trader)";
+export type Decision = "BUY" | "SHORT" | "HOLD" | "AVOID";
+
+export type MarketRegime = "BULL" | "BEAR" | "SIDEWAYS" | "VOLATILE";
 
 export interface AnalysisResult {
-  decision: "BUY" | "HOLD" | "AVOID";
   score: number;
+  decision: Decision;
   confidence: number;
-  price: number;
-  change: number;
-  changePercent: number;
-  rsi: number;
-  macd: {
-    macdLine: number | null;
-    signalLine: number | null;
-    histogram: number | null;
-  };
-  sma50: number | null;
-  sma200: number | null;
-  bollingerBands: {
-    upper: number | null;
-    middle: number | null;
-    lower: number | null;
-  };
-  entryZone: { low: number; high: number };
+  trend: string;
+  entry: number;
   stopLoss: number;
   target: number;
-  riskReward: number;
-  volumeRatio: number;
-  trend: "UPTREND" | "DOWNTREND" | "SIDEWAYS";
   signals: string[];
-  reason: string;
-  atr: number;
-  priceHistory: number[];
-  sma50History: (number | null)[];
-  sma200History: (number | null)[];
 }
 
-export function analyzeStock(
-  closes: number[],
-  highs: number[],
-  lows: number[],
-  volumes: number[]
-): AnalysisResult {
-  if (closes.length < 30) {
-    throw new Error("Not enough price data for analysis");
-  }
+// ================================
+// 🧠 MARKET REGIME DETECTION
+// ================================
+export function detectMarketRegime(prices: number[]): MarketRegime {
+  const sma200 = calculateSMA(prices, 200);
+  const rsi = calculateRSI(prices, 14);
+  const atr = calculateATR(prices, 14);
 
-  const price = closes[closes.length - 1];
-  const prevPrice = closes[closes.length - 2];
-  const change = price - prevPrice;
-  const changePercent = (change / prevPrice) * 100;
+  const price = prices[prices.length - 1];
 
-  const sma50Arr = calculateSMA(closes, 50);
-  const sma200Arr = calculateSMA(closes, 200);
-  const sma50 = sma50Arr[sma50Arr.length - 1];
-  const sma200 = sma200Arr[sma200Arr.length - 1];
+  if (atr / price > 0.03) return "VOLATILE";
 
-  const rsi = calculateRSI(closes, 14);
-  const macd = calculateMACD(closes);
-  const bb = calculateBollingerBands(closes, 20, 2);
-  const atr = calculateATR(highs, lows, closes, 14);
-  const volumeRatio = calculateVolumeRatio(volumes, 20);
+  if (price > sma200 && rsi > 55) return "BULL";
+  if (price < sma200 && rsi < 45) return "BEAR";
 
-  let score = 0;
-  let confidence = 50;
+  return "SIDEWAYS";
+}
+
+// ================================
+// 🧠 MAIN STRATEGY
+// ================================
+export function analyzeStock(prices: number[]): AnalysisResult {
   const signals: string[] = [];
 
-  // 🔥 Trend scoring (no longer blocking)
-  if (sma200 && price > sma200) {
-    score += 20;
-    confidence += 10;
-    signals.push("Uptrend (SMA200)");
-  } else if (sma200) {
-    score += 5;
-    confidence -= 5;
-  }
+  const rsi = calculateRSI(prices, 14);
+  const sma50 = calculateSMA(prices, 50);
+  const sma200 = calculateSMA(prices, 200);
+  const macd = calculateMACD(prices);
+  const atr = calculateATR(prices, 14);
 
-  if (sma50 && price > sma50) {
-    score += 15;
-    confidence += 5;
-  }
+  const price = prices[prices.length - 1];
 
-  // 🔥 RSI improved logic
-  if (rsi >= 40 && rsi <= 70) {
-    score += 20;
-  } else if (rsi < 40) {
-    score += 10; // dip buying
-  } else {
-    score += 5;
-    confidence -= 5;
-  }
+  const regime = detectMarketRegime(prices);
 
-  // 🔥 MACD smarter scoring
-  if (macd.macdLine && macd.signalLine) {
-    if (macd.macdLine > macd.signalLine) {
+  let score = 0;
+
+  // ================================
+  // 🎯 DYNAMIC SCORING BASED ON REGIME
+  // ================================
+
+  if (regime === "BULL") {
+    if (price > sma200) {
+      score += 25;
+      signals.push("Above SMA200 (Bullish)");
+    }
+
+    if (rsi < 60 && rsi > 40) {
       score += 15;
-      confidence += 5;
-    } else {
-      confidence -= 5;
+      signals.push("Healthy RSI");
+    }
+
+    if (macd.histogram > 0) {
+      score += 15;
+      signals.push("MACD Bullish");
     }
   }
 
-  // 🔥 Volume boost
-  if (volumeRatio > 1.1) {
-    score += 10;
-    confidence += 5;
+  if (regime === "BEAR") {
+    if (price < sma200) {
+      score += 25;
+      signals.push("Below SMA200 (Bearish)");
+    }
+
+    if (rsi < 50) {
+      score += 15;
+      signals.push("Weak RSI");
+    }
+
+    if (macd.histogram < 0) {
+      score += 15;
+      signals.push("MACD Bearish");
+    }
   }
 
-  // 🔥 Bollinger context
-  if (bb.middle && price > bb.middle) {
-    score += 10;
+  if (regime === "SIDEWAYS") {
+    if (rsi < 35) {
+      score += 20;
+      signals.push("Oversold (Mean Reversion Buy)");
+    }
+
+    if (rsi > 65) {
+      score += 20;
+      signals.push("Overbought (Mean Reversion Short)");
+    }
   }
 
-  // 🔥 Volatility filter softened
-  const volatility = (atr / price) * 100;
-  if (volatility > 6) {
-    confidence -= 10;
+  if (regime === "VOLATILE") {
+    score -= 10;
+    signals.push("High Volatility - Risky");
   }
 
-  // 🔥 Final decision logic (flexible)
-  let decision: "BUY" | "HOLD" | "AVOID";
-  let reason = "";
+  // ================================
+  // 🧠 DECISION LOGIC
+  // ================================
 
-  // README §3.1 — BUY threshold is immutably 70
-  if (score >= 75 && confidence >= 60) {
+  let decision: Decision = "AVOID";
+
+  if (regime === "BULL" && score >= 60) {
     decision = "BUY";
-    reason = "Strong high-conviction setup";
-  } else if (score >= 70 && confidence >= 50) {
-    decision = "BUY";
-    reason = "Strong setup with confirmation";
-  } else if (score >= 70) {
-    decision = "BUY";
-    reason = "Setup meets threshold, but low confidence";
-  } else if (score >= 50) {
+  }
+
+  if (regime === "BEAR" && score >= 60) {
+    decision = "SHORT";
+  }
+
+  if (regime === "SIDEWAYS") {
+    if (rsi < 35) decision = "BUY";
+    if (rsi > 65) decision = "SHORT";
+  }
+
+  if (score >= 50 && decision === "AVOID") {
     decision = "HOLD";
-    reason = "Moderate setup (early entry)";
-  } else {
-    decision = "AVOID";
-    reason = "Weak technical setup";
   }
 
-  const stopLoss = parseFloat((price - 1.5 * atr).toFixed(2));
-  const target = parseFloat((price + 2.2 * atr).toFixed(2));
-  const risk = price - stopLoss;
-  const reward = target - price;
-  const riskReward = parseFloat((reward / risk).toFixed(2));
+  // ================================
+  // 💰 TRADE SETUP
+  // ================================
 
-  const entryZone = {
-    low: parseFloat((price - 0.5 * atr).toFixed(2)),
-    high: parseFloat((price + 0.3 * atr).toFixed(2)),
-  };
+  let entry = price;
+  let stopLoss = 0;
+  let target = 0;
 
-  const historySlice = Math.min(closes.length, 90);
+  if (decision === "BUY") {
+    stopLoss = price - 1.5 * atr;
+    target = price + 2.2 * atr;
+  }
+
+  if (decision === "SHORT") {
+    stopLoss = price + 1.5 * atr;
+    target = price - 2.2 * atr;
+  }
+
+  const confidence = Math.min(score, 100);
 
   return {
+    score,
     decision,
-    score: Math.round(score),
-    confidence: Math.min(100, Math.max(0, Math.round(confidence))),
-    price: parseFloat(price.toFixed(2)),
-    change: parseFloat(change.toFixed(2)),
-    changePercent: parseFloat(changePercent.toFixed(2)),
-    rsi,
-    macd,
-    sma50: sma50 ?? null,
-    sma200: sma200 ?? null,
-    bollingerBands: bb,
-    entryZone,
-    stopLoss,
-    target,
-    riskReward,
-    volumeRatio,
+    confidence,
     trend:
-      price > (sma50 || 0) && (sma50 || 0) > (sma200 || 0)
+      regime === "BULL"
         ? "UPTREND"
-        : price < (sma50 || 0)
+        : regime === "BEAR"
         ? "DOWNTREND"
         : "SIDEWAYS",
+    entry,
+    stopLoss,
+    target,
     signals,
-    reason,
-    atr,
-    priceHistory: closes.slice(-historySlice),
-    sma50History: sma50Arr.slice(-historySlice),
-    sma200History: sma200Arr.slice(-historySlice),
   };
 }
