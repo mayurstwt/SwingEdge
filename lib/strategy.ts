@@ -22,10 +22,9 @@ export function detectMarketRegime(prices: number[]): MarketRegime {
   const sma200 = calculateSMA(prices, 200);
   const rsi = calculateRSI(prices, 14);
   const atr = calculateATR(prices, 14);
-
   const price = prices[prices.length - 1];
 
-  if (atr / price > 0.03) return "VOLATILE";
+  if (atr / price > 0.035) return "VOLATILE";
 
   if (price > sma200 && rsi > 55) return "BULL";
   if (price < sma200 && rsi < 45) return "BEAR";
@@ -44,7 +43,6 @@ export function analyzeStock(prices: number[]): AnalysisResult {
   const sma200 = calculateSMA(prices, 200);
   const macd = calculateMACD(prices);
   const atr = calculateATR(prices, 14);
-
   const price = prices[prices.length - 1];
 
   const regime = detectMarketRegime(prices);
@@ -52,107 +50,127 @@ export function analyzeStock(prices: number[]): AnalysisResult {
   let score = 0;
 
   // ================================
-  // 🎯 DYNAMIC SCORING BASED ON REGIME
+  // 🎯 STRONG TREND CONFIRMATION
   // ================================
 
-  if (regime === "BULL") {
-    if (price > sma200) {
-      score += 25;
-      signals.push("Above SMA200 (Bullish)");
-    }
+  const strongUptrend = price > sma50 && sma50 > sma200;
+  const strongDowntrend = price < sma50 && sma50 < sma200;
 
-    if (rsi < 60 && rsi > 40) {
-      score += 15;
-      signals.push("Healthy RSI");
-    }
+  // ================================
+  // 📈 BULL LOGIC (STRICT)
+  // ================================
+  if (regime === "BULL" && strongUptrend) {
 
     if (macd.histogram > 0) {
+      score += 25;
+      signals.push("MACD Momentum Up");
+    }
+
+    if (rsi > 45 && rsi < 60) {
+      score += 20;
+      signals.push("RSI Healthy Trend");
+    }
+
+    if (price > sma50) {
       score += 15;
-      signals.push("MACD Bullish");
+      signals.push("Above SMA50");
     }
   }
 
-  if (regime === "BEAR") {
-    if (price < sma200) {
-      score += 25;
-      signals.push("Below SMA200 (Bearish)");
-    }
-
-    if (rsi < 50) {
-      score += 15;
-      signals.push("Weak RSI");
-    }
+  // ================================
+  // 📉 BEAR LOGIC (STRICT)
+  // ================================
+  if (regime === "BEAR" && strongDowntrend) {
 
     if (macd.histogram < 0) {
+      score += 25;
+      signals.push("MACD Momentum Down");
+    }
+
+    if (rsi < 55 && rsi > 40) {
+      score += 20;
+      signals.push("RSI Weak Trend");
+    }
+
+    if (price < sma50) {
       score += 15;
-      signals.push("MACD Bearish");
+      signals.push("Below SMA50");
     }
   }
 
+  // ================================
+  // ⚠️ SIDEWAYS (REDUCED TRADING)
+  // ================================
   if (regime === "SIDEWAYS") {
-    if (rsi < 35) {
-      score += 20;
-      signals.push("Oversold (Mean Reversion Buy)");
+    if (rsi < 30) {
+      score += 15;
+      signals.push("Deep Oversold");
     }
 
-    if (rsi > 65) {
-      score += 20;
-      signals.push("Overbought (Mean Reversion Short)");
+    if (rsi > 70) {
+      score += 15;
+      signals.push("Deep Overbought");
     }
   }
 
+  // ================================
+  // ⚠️ VOLATILITY FILTER
+  // ================================
   if (regime === "VOLATILE") {
-    score -= 10;
-    signals.push("High Volatility - Risky");
+    score -= 20;
+    signals.push("High Volatility Avoid");
   }
 
   // ================================
-  // 🧠 DECISION LOGIC
+  // 🚫 NO TRADE ZONE (IMPORTANT)
   // ================================
+  if (score < 50) {
+    return {
+      score,
+      decision: "AVOID",
+      confidence: score,
+      trend: "SIDEWAYS",
+      entry: price,
+      stopLoss: 0,
+      target: 0,
+      signals,
+    };
+  }
 
-  let decision: Decision = "AVOID";
+  // ================================
+  // 🧠 DECISION LOGIC (STRICT)
+  // ================================
+  let decision: Decision = "HOLD";
 
-  if (regime === "BULL" && score >= 60) {
+  if (regime === "BULL" && strongUptrend && score >= 60) {
     decision = "BUY";
   }
 
-  if (regime === "BEAR" && score >= 60) {
+  if (regime === "BEAR" && strongDowntrend && score >= 60) {
     decision = "SHORT";
   }
 
-  if (regime === "SIDEWAYS") {
-    if (rsi < 35) decision = "BUY";
-    if (rsi > 65) decision = "SHORT";
-  }
-
-  if (score >= 50 && decision === "AVOID") {
-    decision = "HOLD";
-  }
-
   // ================================
-  // 💰 TRADE SETUP
+  // 💰 TRADE SETUP (BETTER RR)
   // ================================
-
   let entry = price;
   let stopLoss = 0;
   let target = 0;
 
   if (decision === "BUY") {
-    stopLoss = price - 1.5 * atr;
-    target = price + 2.2 * atr;
+    stopLoss = price - 1.3 * atr;
+    target = price + 2.5 * atr;
   }
 
   if (decision === "SHORT") {
-    stopLoss = price + 1.5 * atr;
-    target = price - 2.2 * atr;
+    stopLoss = price + 1.3 * atr;
+    target = price - 2.5 * atr;
   }
-
-  const confidence = Math.min(score, 100);
 
   return {
     score,
     decision,
-    confidence,
+    confidence: Math.min(score, 100),
     trend:
       regime === "BULL"
         ? "UPTREND"
