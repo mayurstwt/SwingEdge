@@ -34,7 +34,13 @@ export async function GET(req: Request) {
 
     // Calculate change from previous close
     const price = closes[closes.length - 1];
-    const prevClose = meta.previousClose ?? closes[closes.length - 2] ?? price;
+
+    // FIX: Properly type-check previousClose before using it in arithmetic
+    const rawPrevClose = meta.previousClose;
+    const prevClose: number = typeof rawPrevClose === 'number' && !isNaN(rawPrevClose)
+      ? rawPrevClose
+      : (closes[closes.length - 2] ?? price);
+
     const change = price - prevClose;
     const changePercent = prevClose !== 0 ? (change / prevClose) * 100 : 0;
 
@@ -44,7 +50,7 @@ export async function GET(req: Request) {
 
     try {
       const niftyFull = await getMarketDataFull('^NSEI', { range: '1y', interval: '1d' });
-      
+
       if (niftyFull.closes.length >= 30) {
         const niftyAnalysis = analyzeStock(
           niftyFull.closes,
@@ -52,14 +58,14 @@ export async function GET(req: Request) {
           niftyFull.lows,
           niftyFull.volumes
         );
-        
+
         marketBullish = niftyAnalysis.trend === 'UPTREND';
-        
+
         if (!marketBullish) {
           marketAdjustment = -10;
           analysis.score = Math.max(0, analysis.score + marketAdjustment);
           analysis.signals.push('Score adjusted -10 (bear market / NIFTY downtrend)');
-          
+
           // Re-evaluate decision after adjustment
           if (analysis.score >= 70) {
             analysis.decision = 'BUY';
