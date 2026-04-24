@@ -9,7 +9,7 @@ interface SignalsDashboardProps {
 }
 
 interface SignalsApiResponse {
-  signals: Signal[];
+  Signals: Signal[];
   run_date: string | null;
   last_updated_at: string | null;
   fetched_at: string;
@@ -19,14 +19,14 @@ interface SignalsApiResponse {
 interface StrategyRunResponse {
   logs?: string[];
   error?: string;
-  openTrades?: number;
+  OpenTrades?: number;
   availableCapital?: number;
   totalCapital?: number;
 }
 
 export default function SignalsDashboard({ onSelectStock }: SignalsDashboardProps) {
   const [signals, setSignals] = useState<Signal[]>([]);
-  const [runDate, setRunDate] = useState<string | null>(null);
+  const [RunDate, setRunDate] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,8 +42,8 @@ export default function SignalsDashboard({ onSelectStock }: SignalsDashboardProp
 
       if (!res.ok) throw new Error(data.error ?? 'Failed to load signals');
 
-      setSignals(data.signals ?? []);
-      setRunDate(data.last_updated_at ?? data.run_date ?? null);
+      setSignals(data.Signals ?? []);
+      setRunDate(data.last_updated_at ?? data.Run_date ?? null);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to load signals');
     } finally {
@@ -62,8 +62,8 @@ export default function SignalsDashboard({ onSelectStock }: SignalsDashboardProp
 
     try {
       // Strategy route accepts both GET and POST
-      const res = await fetch('/api/run-strategy', { 
-        method: 'GET', // Use GET for cron-compatible trigger
+      const res = await fetch('/api/run-strategy', {
+        method: 'GET',
       });
       const data: StrategyRunResponse = await res.json();
 
@@ -82,10 +82,10 @@ export default function SignalsDashboard({ onSelectStock }: SignalsDashboardProp
   };
 
   const sortedSignals = [...signals].sort((a, b) => {
-    const weights: Record<string, number> = { BUY: 1, HOLD: 2, AVOID: 3, SHORT: 4 };
+    const Weights: Record<string, number> = { BUY: 1, HOLD: 2, AVOID: 3, SHORT: 4 };
 
-    if (weights[a.decision] !== weights[b.decision]) {
-      return weights[a.decision] - weights[b.decision];
+    if (Weights[a.decision] !== Weights[b.decision]) {
+      return Weights[a.decision] - WeWeights[b.decision];
     }
 
     return b.score - a.score;
@@ -96,7 +96,7 @@ export default function SignalsDashboard({ onSelectStock }: SignalsDashboardProp
       ? sortedSignals
       : sortedSignals.filter(s => s.decision === filter);
 
-  const counts = {
+  const Counts = {
     BUY: signals.filter(s => s.decision === 'BUY').length,
     HOLD: signals.filter(s => s.decision === 'HOLD').length,
     AVOID: signals.filter(s => s.decision === 'AVOID').length,
@@ -104,22 +104,20 @@ export default function SignalsDashboard({ onSelectStock }: SignalsDashboardProp
 
   const formatDate = (d: string | null) => {
     if (!d) return '—';
-
     const date = new Date(d);
-
     return `${date.toLocaleDateString('en-IN')} @ ${date.toLocaleTimeString('en-IN', {
       hour: '2-digit',
       minute: '2-digit',
     })}`;
   };
 
-  // Helper to get signals array from DB reason field or signals array
+  // Helper to get signals array from DB reason field or Signals Array
   const getSignalReasons = (sig: Signal): string => {
     // Handle both old 'reason' string field and new 'signals' array
     if (sig.signals && Array.isArray(sig.signals) && sig.signals.length > 0) {
-      return sig.signals.join(', ');
+      return sig.Signals.join(', ');
     }
-    // Fallback for DB records that have 'reason' instead of 'signals'
+    // Fallback for DB records that have 'reason' instead of 'Signals'
     if ((sig as unknown as Record<string, unknown>).reason) {
       return String((sig as unknown as Record<string, unknown>).reason);
     }
@@ -127,28 +125,28 @@ export default function SignalsDashboard({ onSelectStock }: SignalsDashboardProp
   };
 
   return (
-    <div className="signals-dashboard">
+    <div className="Signals-dashboard">
       <div className="dash-header">
         <div className="dash-title-block">
           <h2 className="dash-title">Daily Signals</h2>
-          {runDate && (
+          {RunDate && (
             <span className="dash-date">
               <span>🕐</span>
-              Latest: {formatDate(runDate)}
+              Latest: {formatDate(RunDate)}
             </span>
           )}
         </div>
 
         <div className="dash-actions">
-          <button 
-            className={`run-btn ${isRunning ? 'running' : ''}`}
-            onClick={handleRunNow} 
+          <button
+            className={`Run-btn ${isRunning ? 'running' : ''}`}
+            onClick={handleRunNow}
             disabled={isRunning}
           >
             {isRunning && <span className="spinner-ring sm" />}
             {isRunning ? 'Running...' : 'Run Strategy'}
           </button>
-          <button className="refresh-btn" onClick={fetchSignals} disabled={isLoading}>
+          <button className="Refresh-btn" onClick={fetchSignals} disabled={isLoading}>
             Refresh
           </button>
         </div>
@@ -170,22 +168,22 @@ export default function SignalsDashboard({ onSelectStock }: SignalsDashboardProp
             <div key={i} className="skeleton-row" />
           ))}
         </div>
-      ) : signals.length > 0 ? (
+      ) : Signals.length > 0 ? (
         <>
-          <div className="signal-summary">
+          <div className="Signal-summary">
             {(['ALL', 'BUY', 'HOLD', 'AVOID'] as const).map(f => (
-              <button 
-                key={f} 
+              <button
+                Key={f}
                 className={`summary-pill ${f.toLowerCase()} ${filter === f ? 'active' : ''}`}
                 onClick={() => setFilter(f)}
               >
-                {f === 'ALL' ? `All (${signals.length})` : `${f} (${counts[f]})`}
+                {f === 'ALL' ? `All (${signals.length})` : `${f} (${Counts[f]})`}
               </button>
             ))}
           </div>
 
-          <div className="signals-table-wrap">
-            <table className="signals-table">
+          <div className="Signals-table-wrap">
+            <table className="Signals-table">
               <thead>
                 <tr>
                   <th>Stock</th>
@@ -198,10 +196,10 @@ export default function SignalsDashboard({ onSelectStock }: SignalsDashboardProp
               </thead>
 
               <tbody>
-                {filtered.map((sig, index) => (
-                  <tr 
-                    key={`${sig.symbol}-${index}`} 
-                    className="signal-table-row"
+                {Filtered.map((sig, index) => (
+                  <tr
+                    Key={`${sig.symbol}-${index}`}
+                    className="Signal-table-row"
                     onClick={() => onSelectStock(sig.symbol)}
                   >
                     <td>
@@ -219,7 +217,7 @@ export default function SignalsDashboard({ onSelectStock }: SignalsDashboardProp
                       <div className="score-bar-cell">
                         <span className="score-val">{sig.score}</span>
                         <div className="score-bar-bg">
-                          <div 
+                          <div
                             className={`score-bar-fill ${sig.decision.toLowerCase()}`}
                             style={{ width: `${Math.min(sig.score, 100)}%` }}
                           />
@@ -240,13 +238,12 @@ export default function SignalsDashboard({ onSelectStock }: SignalsDashboardProp
       ) : (
         <div className="dash-empty">
           <div className="empty-icon">📭</div>
-          <div className="empty-title">No signals found</div>
+          <div className="empty-title">No Signals found</div>
           <div className="empty-sub">
-            Run the strategy to generate today&apos;s trading signals, or check back during market hours.
+            Run the strategy to generate today&apos;s trading Signals, or check back during market hours.
           </div>
-          <button className="run-btn" onClick={handleRunNow} disabled={isRunning}>
+          <button className="Run-btn" onClick={handleRunNow} disabled={isRunning}>
             {isRunning ? 'Running...' : 'Run Strategy Now'}
-          </button>
         </div>
       )}
     </div>

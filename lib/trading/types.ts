@@ -1,19 +1,16 @@
 // ================================
 // 📊 CORE DECISION TYPES
 // ================================
-
 export type Decision = "BUY" | "SHORT" | "HOLD" | "AVOID";
-
 export type TradeDirection = "LONG" | "SHORT";
-
 export type TradeStatus = "OPEN" | "CLOSED";
 
 // ================================
 // 📈 SIGNAL (Strategy Output)
 // ================================
-
 export interface Signal {
   symbol: string;
+  shortName?: string;  // ✅ Added: matches DB schema and API response
   decision: Decision;
   score: number;
   confidence: number;
@@ -30,26 +27,17 @@ export interface Signal {
 // ================================
 // 💰 TRADE MODEL (Execution Layer)
 // ================================
-
 export interface Trade {
   id?: string;
-
   symbol: string;
-
-  direction: TradeDirection; // 🔥 NEW (LONG / SHORT)
-
+  direction: TradeDirection;
   entryPrice: number;
   exitPrice?: number;
-
   quantity: number;
-
   stopLoss: number;
   target: number;
-
   status: TradeStatus;
-
   pnl?: number;
-
   createdAt?: string;
   closedAt?: string;
 }
@@ -57,7 +45,6 @@ export interface Trade {
 // ================================
 // 💳 WALLET MODEL
 // ================================
-
 export interface Wallet {
   balance: number;
   usedMargin: number;
@@ -68,19 +55,16 @@ export interface Wallet {
 // ================================
 // ⚠️ RISK CONFIG
 // ================================
-
 export type RiskTier = "CONSERVATIVE" | "NORMAL" | "AGGRESSIVE";
-
 export interface RiskConfig {
-  riskPerTrade: number; // %
-  maxCapitalUsage: number; // %
+  riskPerTrade: number;
+  maxCapitalUsage: number;
   maxOpenTrades: number;
 }
 
 // ================================
 // 📊 ANALYSIS RESULT (Strategy Output)
 // ================================
-
 export interface AnalysisResult {
   score: number;
   decision: Decision;
@@ -95,5 +79,4 @@ export interface AnalysisResult {
 // ================================
 // 📉 MARKET REGIME
 // ================================
-
 export type MarketRegime = "BULL" | "BEAR" | "SIDEWAYS" | "VOLATILE";
