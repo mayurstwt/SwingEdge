@@ -33,25 +33,73 @@ export function getStockMeta(symbol: string): { shortName: string; sector: strin
   };
 }
 
-
+/**
+ * Get closing prices for strategy analysis
+ * Uses fetchYahooChart (your working utility) instead of non-existent yahooFinance
+ */
 export async function getMarketData(symbol: string): Promise<number[]> {
   try {
-    const queryOptions = {
-      period1: "2024-01-01",
-      interval: "1d",
-    };
+    const result = await fetchYahooChart(symbol, '1y', '1d', 12000, 2);
 
-    const result = await yahooFinance.historical(symbol + ".NS", queryOptions);
+    const quote = result.indicators?.quote?.[0] ?? {};
+    const timestamps: number[] = result.timestamp ?? [];
 
-    if (!result || result.length === 0) return [];
+    const candles = normalizeCandleRows(
+      timestamps.map((timestamp, index) => ({
+        date: new Date(timestamp * 1000).toISOString().slice(0, 10),
+        open: quote.open?.[index] ?? undefined,
+        high: quote.high?.[index] ?? undefined,
+        low: quote.low?.[index] ?? undefined,
+        close: quote.close?.[index] ?? undefined,
+        volume: quote.volume?.[index] ?? undefined,
+      }))
+    );
 
-    return result.map((item) => item.close).filter(Boolean);
+    return candles.map((c) => c.close);
   } catch (err) {
-    console.error("Market data error:", err);
+    console.error('Market data error for', symbol, ':', err);
     return [];
   }
 }
 
+/**
+ * Get full OHLCV series for advanced analysis (ATR, etc.)
+ */
+export async function getMarketDataFull(
+  symbol: string,
+  options?: { range?: string; interval?: string }
+): Promise<{ closes: number[]; highs: number[]; lows: number[]; volumes: number[] }> {
+  const range = options?.range ?? '1y';
+  const interval = options?.interval ?? '1d';
+
+  try {
+    const result = await fetchYahooChart(symbol, range, interval, 15000, 2);
+
+    const quote = result.indicators?.quote?.[0] ?? {};
+    const timestamps: number[] = result.timestamp ?? [];
+
+    const candles = normalizeCandleRows(
+      timestamps.map((timestamp, index) => ({
+        date: new Date(timestamp * 1000).toISOString().slice(0, 10),
+        open: quote.open?.[index] ?? undefined,
+        high: quote.high?.[index] ?? undefined,
+        low: quote.low?.[index] ?? undefined,
+        close: quote.close?.[index] ?? undefined,
+        volume: quote.volume?.[index] ?? undefined,
+      }))
+    );
+
+    return {
+      closes: candles.map((c) => c.close),
+      highs: candles.map((c) => c.high),
+      lows: candles.map((c) => c.low),
+      volumes: candles.map((c) => c.volume),
+    };
+  } catch (err) {
+    console.error('Full market data error for', symbol, ':', err);
+    return { closes: [], highs: [], lows: [], volumes: [] };
+  }
+}
 
 export async function fetchHistoricalSeries(
   symbol: string,
