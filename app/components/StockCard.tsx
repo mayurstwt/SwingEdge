@@ -1,3 +1,4 @@
+// app/components/StockCard.tsx
 'use client';
 
 import type { AnalysisResult } from '@/lib/strategy';
@@ -13,21 +14,21 @@ export default function StockCard({ data }: StockCardProps) {
     decision,
     score,
     confidence,
-    price,
-    change,
-    changePercent,
-    rsi,
-    macd,
-    sma50,
-    sma200,
-    bollingerBands,
-    entryZone,
+    price = 0,
+    change = 0,
+    changePercent = 0,
+    rsi = 50,
+    macd = { macdLine: null, signalLine: null, histogram: null },
+    sma50 = null,
+    sma200 = null,
+    bollingerBands = { upper: null, middle: null, lower: null },
+    entryZone = { low: 0, high: 0 },
     stopLoss,
     target,
-    riskReward,
-    volumeRatio,
-    trend,
-    signals,
+    riskReward = 0,
+    volumeRatio = 1,
+    trend = 'SIDEWAYS',
+    signals = [],
   } = data;
 
   const isPositive = change >= 0;
@@ -39,8 +40,8 @@ export default function StockCard({ data }: StockCardProps) {
   const trendClass =
     trend === 'UPTREND' ? 'trend-up' : trend === 'DOWNTREND' ? 'trend-down' : 'trend-side';
 
-  const formatPrice = (v: number | null) =>
-    v !== null ? `₹${v.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—';
+  const formatPrice = (v: number | null | undefined) =>
+    v != null ? `₹${v.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—';
 
   return (
     <div className={`stock-card ${decisionClass}`} id="stock-analysis-card">
@@ -156,7 +157,7 @@ function SetupRow({ label, value, type }: { label: string; value: string; type: 
 function PriceRuler({ low, entry, target }: { low: number; entry: number; target: number }) {
   const range = target - low;
   const stopPct = 0;
-  const entryPct = ((entry - low) / range) * 100;
+  const entryPct = range !== 0 ? ((entry - low) / range) * 100 : 50;
   const targetPct = 100;
 
   return (
