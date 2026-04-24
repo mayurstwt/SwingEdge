@@ -77,7 +77,7 @@ const niftyAnalysis = analyzeStock(closes);
 
     if (!marketBullish) {
       analysis.score = Math.max(0, analysis.score - 10);
-      analysis.reason += ' [raw score −10 (bear mkt)]';
+      analysis.signals.push('Score adjusted -10 (bear market)');
       // Re-evaluate decision
       if (analysis.score >= 70) {
         analysis.decision = 'BUY';
