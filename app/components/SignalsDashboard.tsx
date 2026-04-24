@@ -8,7 +8,7 @@ interface SignalsDashboardProps {
 }
 
 export default function SignalsDashboard({ onSelectStock }: SignalsDashboardProps) {
-  const [signals, setSignals] = useState<SignalRow[]>([]);
+  const [signals, setSignals] = useState<Signal[]>([]);
   const [runDate, setRunDate] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
@@ -22,7 +22,9 @@ export default function SignalsDashboard({ onSelectStock }: SignalsDashboardProp
     try {
       const res = await fetch('/api/signals');
       const data = await res.json();
+
       if (!res.ok) throw new Error(data.error ?? 'Failed to load signals');
+
       setSignals(data.signals ?? []);
       setRunDate(data.last_updated_at ?? data.run_date ?? null);
     } catch (err: unknown) {
@@ -32,24 +34,23 @@ export default function SignalsDashboard({ onSelectStock }: SignalsDashboardProp
     }
   }, []);
 
-  useEffect(() => { fetchSignals(); }, [fetchSignals]);
+  useEffect(() => {
+    fetchSignals();
+  }, [fetchSignals]);
 
   const handleRunNow = async () => {
     setIsRunning(true);
     setError(null);
     setDebugLogs([]);
+
     try {
       const res = await fetch('/api/run-strategy', { method: 'POST' });
       const data = await res.json();
-      
+
       if (data.logs) setDebugLogs(data.logs);
 
       if (!res.ok) {
         throw new Error(data.error ?? 'Strategy run failed');
-      }
-      
-      if (data.processed === 0 && data.logs?.length > 0) {
-        setError("Strategy processed 0 stocks. See logs below.");
       }
 
       await fetchSignals();
@@ -63,112 +64,94 @@ export default function SignalsDashboard({ onSelectStock }: SignalsDashboardProp
 
   const sortedSignals = [...signals].sort((a, b) => {
     const weights = { BUY: 1, HOLD: 2, AVOID: 3 };
+
     if (weights[a.decision] !== weights[b.decision]) {
       return weights[a.decision] - weights[b.decision];
     }
+
     return b.score - a.score;
   });
 
-  const filtered = filter === 'ALL' ? sortedSignals : sortedSignals.filter(s => s.decision === filter);
+  const filtered =
+    filter === 'ALL'
+      ? sortedSignals
+      : sortedSignals.filter(s => s.decision === filter);
+
   const counts = {
-    BUY:   signals.filter(s => s.decision === 'BUY').length,
-    HOLD:  signals.filter(s => s.decision === 'HOLD').length,
+    BUY: signals.filter(s => s.decision === 'BUY').length,
+    HOLD: signals.filter(s => s.decision === 'HOLD').length,
     AVOID: signals.filter(s => s.decision === 'AVOID').length,
   };
 
   const formatDate = (d: string | null) => {
     if (!d) return '—';
+
     const date = new Date(d);
-    const dateStr = date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-    const timeStr = date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
-    return `${dateStr} @ ${timeStr}`;
+
+    return `${date.toLocaleDateString('en-IN')} @ ${date.toLocaleTimeString('en-IN', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
   };
 
   return (
-    <div className="signals-dashboard" id="signals-dashboard">
+    <div className="signals-dashboard">
       <div className="dash-header">
-        <div className="dash-title-block">
-          <h2 className="dash-title">Daily Signals <span className="auto-label">AUTO</span></h2>
-          {runDate && (
-            <span className="dash-date">
-              <span className="live-dot" />
-              Latest Data: {formatDate(runDate)}
-            </span>
-          )}
+        <div>
+          <h2>Daily Signals</h2>
+          {runDate && <small>Latest: {formatDate(runDate)}</small>}
         </div>
-        <div className="dash-actions">
-          <button className={`run-btn ${isRunning ? 'running' : ''}`} onClick={handleRunNow} disabled={isRunning}>
-            {isRunning ? 'Running Scan...' : '▶ Run Strategy Now'}
+
+        <div>
+          <button onClick={handleRunNow} disabled={isRunning}>
+            {isRunning ? 'Running...' : 'Run Strategy'}
           </button>
-          <button className="refresh-btn" onClick={fetchSignals} disabled={isLoading}>⟳</button>
+          <button onClick={fetchSignals}>Refresh</button>
         </div>
       </div>
 
-      <div className="dash-info-note">
-        ℹ️ Signal scores are adjusted for market conditions (−10 if NIFTY bearish). Click any row to see the detailed breakdown.
-      </div>
-
-      {error && (
-        <div className="dash-error slide-in">
-          <span>⚠ {error}</span>
-          {debugLogs.length > 0 && (
-            <div className="debug-logs">
-              {debugLogs.slice(0, 5).map((l, i) => <div key={i} className="log-line">{l}</div>)}
-            </div>
-          )}
-        </div>
-      )}
+      {error && <div className="error">{error}</div>}
 
       {signals.length > 0 ? (
         <>
-          <div className="signal-summary">
+          <div>
             {(['ALL', 'BUY', 'HOLD', 'AVOID'] as const).map(f => (
-              <button key={f} className={`summary-pill ${f.toLowerCase()} ${filter === f ? 'active' : ''}`} onClick={() => setFilter(f)}>
+              <button key={f} onClick={() => setFilter(f)}>
                 {f === 'ALL' ? `All (${signals.length})` : `${f} (${counts[f]})`}
               </button>
             ))}
           </div>
 
-          <div className="signals-table-wrap">
-            <table className="signals-table">
-              <thead>
-                <tr>
-                  <th>Stock</th>
-                  <th>Decision</th>
-                  <th>Score</th>
-                  <th>Reason</th>
-                  <th>Price</th>
+          <table>
+            <thead>
+              <tr>
+                <th>Stock</th>
+                <th>Decision</th>
+                <th>Score</th>
+                <th>Signals</th>
+                <th>Price</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {filtered.map((sig, index) => (
+                <tr key={index} onClick={() => onSelectStock(sig.symbol)}>
+                  <td>{sig.symbol}</td>
+                  <td>{sig.decision}</td>
+                  <td>{sig.score}</td>
+
+                  {/* ✅ FIXED: signals instead of reason */}
+                  <td>{sig.signals?.join(', ') || '—'}</td>
+
+                  <td>₹{sig.price}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {filtered.map(sig => (
-                  <tr key={sig.id} className="signal-table-row" onClick={() => onSelectStock(sig.symbol)}>
-                    <td>
-                      <div className="sym-cell">
-                        <span className="sym-ticker">{sig.symbol.replace('.NS', '')}</span>
-                        <span className="sym-name">{sig.short_name}</span>
-                      </div>
-                    </td>
-                    <td><span className={`decision-badge ${sig.decision.toLowerCase()}`}>{sig.decision}</span></td>
-                    <td>{sig.score}</td>
-                    <td className="reason-cell">{sig.reason || '—'}</td>
-                    <td className="mono">₹{sig.price}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </table>
         </>
       ) : (
-        !isLoading && !isRunning && (
-          <div className="dash-empty">
-            <p>No signals found in the database.</p>
-            <p className="sub">Click &quot;Run Strategy Now&quot; to scan the market.</p>
-          </div>
-        )
+        !isLoading && <div>No signals found</div>
       )}
-
-      {isLoading && <div className="skeleton-row tall" />}
     </div>
   );
 }
