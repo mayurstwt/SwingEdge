@@ -1,6 +1,5 @@
 'use client';
-
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useMemo } from 'react';
 import {
   Chart,
   LineController,
@@ -25,32 +24,25 @@ Chart.register(
 );
 
 interface PriceChartProps {
-  priceHistory: number[];
-  sma50History: (number | null)[];
-  sma200History: (number | null)[];
+  priceHistory?: number[];
+  sma50History?: (number | null)[];
+  sma200History?: (number | null)[];
   symbol: string;
 }
 
 export default function PriceChart({
-  priceHistory,
-  sma50History,
-  sma200History,
+  priceHistory = [],
+  sma50History = [],
+  sma200History = [],
   symbol,
 }: PriceChartProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const chartRef = useRef<Chart | null>(null);
 
-  useEffect(() => {
-    if (!canvasRef.current) return;
-
-    // Destroy existing chart
-    if (chartRef.current) {
-      chartRef.current.destroy();
-      chartRef.current = null;
-    }
-
+  // Memoize labels to avoid re-creation on every render
+  const labels = useMemo(() => {
     const n = priceHistory.length;
-    const labels = Array.from({ length: n }, (_, i) => {
+    return Array.from({ length: n }, (_, i) => {
       const daysAgo = n - 1 - i;
       const d = new Date();
       d.setDate(d.getDate() - daysAgo);
@@ -60,6 +52,16 @@ export default function PriceChart({
       }
       return '';
     });
+  }, [priceHistory.length]);
+
+  useEffect(() => {
+    if (!canvasRef.current || priceHistory.length === 0) return;
+
+    // Destroy existing chart
+    if (chartRef.current) {
+      chartRef.current.destroy();
+      chartRef.current = null;
+    }
 
     const ctx = canvasRef.current.getContext('2d');
     if (!ctx) return;
@@ -180,7 +182,24 @@ export default function PriceChart({
         chartRef.current = null;
       }
     };
-  }, [priceHistory, sma50History, sma200History, symbol]);
+  }, [priceHistory, sma50History, sma200History, symbol, labels]);
+
+  // Show empty state when no data
+  if (priceHistory.length === 0) {
+    return (
+      <div className="chart-container" id="price-chart-container">
+        <div className="chart-header">
+          <h3 className="chart-title">
+            <span className="chart-symbol">{symbol.replace('.NS', '')}</span>
+            <span className="chart-subtitle">6-Month Price Chart</span>
+          </h3>
+        </div>
+        <div className="chart-empty">
+          <p>Insufficient data to render chart</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="chart-container" id="price-chart-container">
