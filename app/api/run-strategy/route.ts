@@ -164,4 +164,39 @@ export async function GET() {
       // 📉 TRADE TYPE
       // ================================
       const direction: TradeDirection =
-        analysis
+        analysis.decision === "BUY" ? "LONG" : "SHORT";
+
+      // ================================
+      // 💰 CREATE TRADE
+      // ================================
+      const { error } = await supabase.from("trades").insert({
+        symbol,
+        direction,
+        entry_price: analysis.entry,
+        stop_loss: analysis.stopLoss,
+        target: analysis.target,
+        quantity,
+        status: "OPEN",
+      });
+
+      if (error) {
+        logs.push(`${symbol}: trade failed`);
+        continue;
+      }
+
+      const capitalUsed = analysis.entry * quantity;
+      availableCapital -= capitalUsed;
+
+      await updateWallet({
+        balance: availableCapital,
+      });
+
+      logs.push(`${symbol}: ${direction} opened`);
+    }
+
+    return NextResponse.json({ logs });
+  } catch (err) {
+    console.error(err);
+    return NextResponse.json({ error: "Strategy failed" }, { status: 500 });
+  }
+}
