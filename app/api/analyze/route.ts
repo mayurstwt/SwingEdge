@@ -50,7 +50,7 @@ export async function GET(req: Request) {
     const volumes = rows.map((r) => r.volume);
 
     const meta = result.meta ?? {};
-    const analysis = analyzeStock(closes, highs, lows, volumes);
+    const analysis = analyzeStock(closes);
 
     // Apply market filter to match run-strategy logic
     let marketBullish = true;
