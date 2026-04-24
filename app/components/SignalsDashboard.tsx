@@ -1,3 +1,4 @@
+// app/components/SignalsDashboard.tsx
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -63,7 +64,7 @@ export default function SignalsDashboard({ onSelectStock }: SignalsDashboardProp
   };
 
   const sortedSignals = [...signals].sort((a, b) => {
-    const weights = { BUY: 1, HOLD: 2, AVOID: 3 };
+    const weights: Record<string, number> = { BUY: 1, HOLD: 2, AVOID: 3, SHORT: 4 };
 
     if (weights[a.decision] !== weights[b.decision]) {
       return weights[a.decision] - weights[b.decision];
