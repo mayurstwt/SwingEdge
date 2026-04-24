@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import type { SignalRow } from '@/lib/supabase';
+import type { Signal } from '@/lib/trading/types';
 
 interface SignalsDashboardProps {
   onSelectStock: (symbol: string) => void;
