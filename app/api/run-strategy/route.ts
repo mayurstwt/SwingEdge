@@ -2,7 +2,11 @@ import { NextResponse } from "next/server";
 import { analyzeStock } from "@/lib/strategy";
 import { getMarketData } from "@/lib/trading/market-data";
 import { calculatePositionSize } from "@/lib/trading/risk";
-import { getWallet, updateWallet } from "@/lib/wallet";
+import {
+  getWallet,
+  updateWallet,
+  calculatePnL,
+} from "@/lib/wallet";
 import { supabase } from "@/lib/supabase";
 import { TradeDirection } from "@/lib/trading/types";
 
@@ -17,21 +21,11 @@ export async function GET() {
     // 💰 LOAD WALLET
     // ================================
     const wallet = await getWallet();
-
     if (!wallet) {
       return NextResponse.json({ error: "Wallet not found" }, { status: 400 });
     }
 
     let availableCapital = wallet.balance;
-
-    // ================================
-    // 📊 LOAD STOCKS
-    // ================================
-    const { data: stocks } = await supabase.from("signals").select("symbol");
-
-    if (!stocks) {
-      return NextResponse.json({ error: "No stocks found" });
-    }
 
     // ================================
     // 📂 LOAD OPEN TRADES
@@ -41,13 +35,92 @@ export async function GET() {
       .select("*")
       .eq("status", "OPEN");
 
+    // ================================
+    // 🔁 CLOSE EXISTING TRADES FIRST
+    // ================================
+    if (openTrades && openTrades.length > 0) {
+      for (const trade of openTrades) {
+        const marketData = await getMarketData(trade.symbol);
+        if (!marketData || marketData.length === 0) continue;
+
+        const currentPrice = marketData[marketData.length - 1];
+
+        let shouldClose = false;
+
+        // LONG EXIT
+        if (trade.direction === "LONG") {
+          if (currentPrice <= trade.stop_loss) {
+            logs.push(`${trade.symbol}: LONG stop loss hit`);
+            shouldClose = true;
+          }
+
+          if (currentPrice >= trade.target) {
+            logs.push(`${trade.symbol}: LONG target hit`);
+            shouldClose = true;
+          }
+        }
+
+        // SHORT EXIT
+        if (trade.direction === "SHORT") {
+          if (currentPrice >= trade.stop_loss) {
+            logs.push(`${trade.symbol}: SHORT stop loss hit`);
+            shouldClose = true;
+          }
+
+          if (currentPrice <= trade.target) {
+            logs.push(`${trade.symbol}: SHORT target hit`);
+            shouldClose = true;
+          }
+        }
+
+        if (shouldClose) {
+          const pnl = calculatePnL(
+            trade.direction,
+            trade.entry_price,
+            currentPrice,
+            trade.quantity
+          );
+
+          // update trade
+          await supabase
+            .from("trades")
+            .update({
+              exit_price: currentPrice,
+              pnl,
+              status: "CLOSED",
+              closed_at: new Date().toISOString(),
+            })
+            .eq("id", trade.id);
+
+          // update wallet
+          availableCapital += pnl;
+
+          await updateWallet({
+            balance: availableCapital,
+          });
+        }
+      }
+    }
+
+    // ================================
+    // 🚫 CHECK OPEN TRADES LIMIT
+    // ================================
     if (openTrades && openTrades.length >= MAX_OPEN_TRADES) {
       logs.push("Max open trades reached");
       return NextResponse.json({ logs });
     }
 
     // ================================
-    // 🔁 PROCESS EACH STOCK
+    // 📊 LOAD STOCK LIST
+    // ================================
+    const { data: stocks } = await supabase.from("signals").select("symbol");
+
+    if (!stocks) {
+      return NextResponse.json({ error: "No stocks found" });
+    }
+
+    // ================================
+    // 🔁 PROCESS NEW TRADES
     // ================================
     for (const stock of stocks) {
       const symbol = stock.symbol;
@@ -69,7 +142,7 @@ export async function GET() {
       // 🚫 CAPITAL CHECK
       // ================================
       if (availableCapital <= wallet.balance * (1 - MAX_CAPITAL_USAGE)) {
-        logs.push(`${symbol}: capital usage limit reached`);
+        logs.push(`${symbol}: capital limit reached`);
         continue;
       }
 
@@ -77,57 +150,18 @@ export async function GET() {
       // 📐 POSITION SIZE
       // ================================
       const quantity = calculatePositionSize({
-        balance: wallet.balance,
+        balance: availableCapital,
         entry: analysis.entry,
         stopLoss: analysis.stopLoss,
       });
 
       if (!quantity || quantity <= 0) {
-        logs.push(`${symbol}: invalid position size`);
+        logs.push(`${symbol}: invalid size`);
         continue;
       }
 
       // ================================
-      // 📉 DETERMINE TRADE TYPE
+      // 📉 TRADE TYPE
       // ================================
-      let direction: TradeDirection =
-        analysis.decision === "BUY" ? "LONG" : "SHORT";
-
-      // ================================
-      // 💰 CREATE TRADE
-      // ================================
-      const { error: tradeError } = await supabase.from("trades").insert({
-        symbol,
-        direction,
-        entry_price: analysis.entry,
-        stop_loss: analysis.stopLoss,
-        target: analysis.target,
-        quantity,
-        status: "OPEN",
-      });
-
-      if (tradeError) {
-        logs.push(`${symbol}: trade failed`);
-        continue;
-      }
-
-      // ================================
-      // 💳 UPDATE WALLET
-      // ================================
-      const capitalUsed = analysis.entry * quantity;
-
-      availableCapital -= capitalUsed;
-
-      await updateWallet({
-        balance: availableCapital,
-      });
-
-      logs.push(`${symbol}: ${direction} trade opened`);
-    }
-
-    return NextResponse.json({ logs });
-  } catch (error) {
-    console.error(error);
-    return NextResponse.json({ error: "Strategy failed" }, { status: 500 });
-  }
-}
+      const direction: TradeDirection =
+        analysis
