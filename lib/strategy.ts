@@ -1,3 +1,4 @@
+// lib/strategy.ts
 import { calculateRSI, calculateSMA, calculateMACD, calculateATR } from "./indicators";
 
 export type Decision = "BUY" | "SHORT" | "HOLD" | "AVOID";
@@ -13,6 +14,33 @@ export interface AnalysisResult {
   stopLoss: number;
   target: number;
   signals: string[];
+  // Extended fields returned by API and used by UI
+  price?: number;
+  change?: number;
+  changePercent?: number;
+  rsi?: number;
+  macd?: {
+    macdLine: number | null;
+    signalLine: number | null;
+    histogram: number | null;
+  };
+  sma50?: number | null;
+  sma200?: number | null;
+  bollingerBands?: {
+    upper: number | null;
+    middle: number | null;
+    lower: number | null;
+  };
+  entryZone?: {
+    low: number;
+    high: number;
+  };
+  riskReward?: number;
+  volumeRatio?: number;
+  // Chart histories
+  priceHistory?: number[];
+  sma50History?: (number | null)[];
+  sma200History?: (number | null)[];
 }
 
 // ================================
