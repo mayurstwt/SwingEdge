@@ -82,6 +82,27 @@ CREATE TABLE IF NOT EXISTS ledger (
   created_at  timestamptz DEFAULT now()
 );
 
+-- 6. Daily market news cache
+CREATE TABLE IF NOT EXISTS market_news (
+  id              uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  source          text NOT NULL,
+  source_type     text NOT NULL CHECK (source_type IN ('MARKET', 'COMPANY')),
+  title           text NOT NULL,
+  summary         text,
+  link            text NOT NULL,
+  image_url       text,
+  published_at    timestamptz,
+  symbols         text[] DEFAULT '{}',
+  fingerprint     text NOT NULL UNIQUE,
+  relevance_score integer DEFAULT 0,
+  synced_at       timestamptz DEFAULT now(),
+  created_at      timestamptz DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS market_news_published_idx ON market_news(published_at DESC);
+CREATE INDEX IF NOT EXISTS market_news_source_type_idx ON market_news(source_type);
+CREATE INDEX IF NOT EXISTS market_news_symbols_idx ON market_news USING GIN(symbols);
+
 
 
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS entry_type text;
@@ -105,9 +126,11 @@ ALTER TABLE trades      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE wallet      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE daily_stats ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ledger      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE market_news  ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "anon_full_signals"     ON signals     FOR ALL USING (true);
 CREATE POLICY "anon_full_trades"      ON trades      FOR ALL USING (true);
 CREATE POLICY "anon_full_wallet"      ON wallet      FOR ALL USING (true);
 CREATE POLICY "anon_full_daily_stats" ON daily_stats FOR ALL USING (true);
 CREATE POLICY "anon_full_ledger"      ON ledger      FOR ALL USING (true);
+CREATE POLICY "anon_full_market_news" ON market_news FOR ALL USING (true);

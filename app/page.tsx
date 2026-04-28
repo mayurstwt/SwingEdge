@@ -7,6 +7,7 @@ import MarketOverview from './components/MarketOverview';
 import StockCard from './components/StockCard';
 import SignalsDashboard from './components/SignalsDashboard';
 import WalletPanel from './components/WalletPanel';
+import DailyNewsPanel from './components/DailyNewsPanel';
 import type { AnalysisResult } from '@/lib/strategy';
 
 const PriceChart = dynamic(() => import('./components/PriceChart'), { ssr: false });
@@ -17,7 +18,7 @@ type StockData = AnalysisResult & {
   currency: string;
 };
 
-type MainTab = 'live' | 'signals';
+type MainTab = 'live' | 'signals' | 'news';
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<MainTab>('signals');
@@ -117,6 +118,15 @@ export default function Home() {
           Daily Signals
           <span className="tab-badge">AUTO</span>
         </button>
+        <button
+          id="tab-news"
+          className={`main-tab ${activeTab === 'news' ? 'active' : ''}`}
+          onClick={() => setActiveTab('news')}
+        >
+          <span className="tab-icon">📰</span>
+          Daily News
+          <span className="tab-badge">FREE</span>
+        </button>
       </nav>
 
       {/* ═══════════════════════════════════════
@@ -209,6 +219,12 @@ export default function Home() {
         <section className="signals-tab-content" id="signals-tab-content">
           <SignalsDashboard onSelectStock={handleSignalSelect} />
           <WalletPanel />
+        </section>
+      )}
+
+      {activeTab === 'news' && (
+        <section className="signals-tab-content" id="news-tab-content">
+          <DailyNewsPanel />
         </section>
       )}
 

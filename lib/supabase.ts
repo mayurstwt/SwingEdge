@@ -119,6 +119,22 @@ export interface DailyStatsRow {
   created_at: string;
 }
 
+export interface NewsRow {
+  id: string;
+  source: string;
+  source_type: 'MARKET' | 'COMPANY';
+  title: string;
+  summary?: string | null;
+  link: string;
+  image_url?: string | null;
+  published_at?: string | null;
+  symbols?: string[];
+  fingerprint: string;
+  relevance_score?: number;
+  synced_at?: string | null;
+  created_at?: string;
+}
+
 // ================================
 // 🔧 TYPE-SAFE TABLE HELPERS
 // ================================
@@ -129,6 +145,7 @@ export type Tables = {
   ledger: LedgerRow;
   wallet: WalletRow;
   daily_stats: DailyStatsRow;
+  market_news: NewsRow;
 };
 
 // Helper for type-safe queries

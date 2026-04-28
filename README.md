@@ -14,6 +14,7 @@ SwingEdge is a high-frequency algorithmic swing trading terminal for the NSE (Na
 - **Database**: Supabase (PostgreSQL + Realtime)
 - **Math/Charts**: Chart.js 4+
 - **Data Source**: Yahoo Finance API (v8/chart)
+- **News Source**: Google News RSS + Economic Times Markets RSS
 
 ---
 
@@ -63,6 +64,7 @@ The system must remain **Conservative**.
 | `signals` | Daily scan results | `symbol`, `score`, `decision`, `run_date` |
 | `trades` | Paper trading ledger | `buy_price`, `status` (OPEN/CLOSED), `pnl` |
 | `wallet` | Virtual bank | `balance`, `updated_at` |
+| `market_news` | Cached Daily News feed | `source`, `title`, `link`, `symbols`, `published_at` |
 
 ---
 
@@ -96,8 +98,49 @@ Add to `lib/indicators.ts`, then integrate into `analyzeStock` in `lib/strategy.
 
 ---
 
-## 8. Educational Disclaimer
+## 8. Daily News Feature
+
+SwingEdge now includes a `Daily News` tab beside `Live Analysis` and `Daily Signals`.
+
+### What it does
+- Aggregates free Indian market headlines from Google News RSS and Economic Times Markets RSS.
+- Tags headlines against the tracked NSE stock universe in `data/stocks.json`.
+- Highlights articles related to currently open paper trades.
+- Caches headlines in Supabase table `market_news` when that table exists.
+- Falls back to live feed mode if the `market_news` table has not been created yet.
+
+### Daily News file map
+- Added: `app/components/DailyNewsPanel.tsx`
+- Added: `app/api/news/route.ts`
+- Added: `app/api/news/refresh/route.ts`
+- Added: `lib/news.ts`
+- Changed: `app/page.tsx`
+- Changed: `app/globals.css`
+- Changed: `lib/supabase.ts`
+- Changed: `supabase/schema.sql`
+- Changed: `package.json`
+- Changed: `package-lock.json`
+- Changed: `README.md`
+
+### How to remove the Daily News feature
+1. Delete:
+   `app/components/DailyNewsPanel.tsx`, `app/api/news/route.ts`, `app/api/news/refresh/route.ts`, `lib/news.ts`
+2. Revert Daily News tab wiring from:
+   `app/page.tsx`
+3. Revert Daily News styles from:
+   `app/globals.css`
+4. Remove `market_news` types from:
+   `lib/supabase.ts`
+5. Remove the `market_news` table and RLS policy from:
+   `supabase/schema.sql`
+6. Remove the `rss-parser` dependency from:
+   `package.json` and `package-lock.json`
+7. Remove this README section.
+
+---
+
+## 9. Educational Disclaimer
 SwingEdge is a **simulation platform**. It is for educational purposes only. It does not interface with real brokers and should not be used as financial advice.
 
 ---
-*Last Updated: 21 April 2026*
+*Last Updated: 28 April 2026*
