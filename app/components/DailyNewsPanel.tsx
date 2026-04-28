@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-type NewsFilter = 'all' | 'market' | 'company' | 'related';
+type NewsFilter = 'all' | 'company' | 'related';
 
 interface NewsItem {
   source: string;
@@ -92,10 +92,6 @@ export default function DailyNewsPanel() {
   }, [fetchNews]);
 
   const filteredItems = useMemo(() => {
-    if (filter === 'market') {
-      return items.filter((item) => item.source_type === 'MARKET');
-    }
-
     if (filter === 'company') {
       return items.filter((item) => item.source_type === 'COMPANY');
     }
@@ -109,7 +105,6 @@ export default function DailyNewsPanel() {
 
   const filterCounts = useMemo(() => ({
     all: items.length,
-    market: items.filter((item) => item.source_type === 'MARKET').length,
     company: items.filter((item) => item.source_type === 'COMPANY').length,
     related: items.filter((item) => item.related_to_open_trade).length,
   }), [items]);
@@ -171,7 +166,6 @@ export default function DailyNewsPanel() {
       <div className="signal-summary">
         {([
           ['all', `All (${filterCounts.all})`],
-          ['market', `Market (${filterCounts.market})`],
           ['company', `Company (${filterCounts.company})`],
           ['related', `Related (${filterCounts.related})`],
         ] as const).map(([key, label]) => (
