@@ -49,14 +49,18 @@ export default function WalletPanel() {
 
   const fetchWallet = useCallback(async () => {
     try {
-      const res = await fetch('/api/wallet');
+      const res = await fetch('/api/wallet', { cache: 'no-store' });
       const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error ?? 'Unable to fetch wallet data.');
+      }
+
       setBalance(Number(data.balance ?? 0));
       setTrades(data.trades ?? []);
       setLedger(data.ledger ?? []);
       setSignals(data.signals ?? []);
-    } catch {
-      setError('Unable to fetch wallet data.');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Unable to fetch wallet data.');
     } finally {
       setIsLoading(false);
     }

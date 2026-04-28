@@ -2,39 +2,43 @@ import { getSupabase } from '@/lib/supabase';
 
 export async function GET() {
   const supabase = getSupabase();
-  const now = new Date();
-  const today = now.toISOString().split('T')[0];
-
-  // Logic: 
-  // 1. Try to find signals for the exact 'today' date.
-  // 2. If empty, find the most recent available date in the signals table and return those.
+  const today = new Date().toISOString().split('T')[0];
   
   try {
-    const { data: latestRun } = await supabase
-      .from('signals')
-      .select('run_date, updated_at')
-      .order('run_date', { ascending: false })
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .single();
-
-    if (!latestRun) {
-      return Response.json({ signals: [], run_date: null });
-    }
-
-    const { data, error } = await supabase
+    // First try to get signals from today
+    let { data: signals, error } = await supabase
       .from('signals')
       .select('*')
-      .eq('run_date', latestRun.run_date)
+      .eq('run_date', today)
       .order('score', { ascending: false });
-
+    
     if (error) throw error;
-
-    return Response.json({ 
-      signals: data ?? [], 
-      run_date: latestRun.run_date,
-      last_updated_at: latestRun.updated_at,
-      fetched_at: today 
+    
+    // If no signals today, get the most recent run
+    if (!signals || signals.length === 0) {
+      const { data: latestRun } = await supabase
+        .from('signals')
+        .select('run_date')
+        .order('run_date', { ascending: false })
+        .limit(1)
+        .single();
+      
+      if (latestRun) {
+        const { data: recentSignals } = await supabase
+          .from('signals')
+          .select('*')
+          .eq('run_date', latestRun.run_date)
+          .order('score', { ascending: false });
+        
+        signals = recentSignals;
+      }
+    }
+    
+    return Response.json({
+      signals: signals ?? [],
+      run_date: today,
+      last_updated_at: new Date().toISOString(),
+      fetched_at: today
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to fetch signals';

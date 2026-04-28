@@ -31,6 +31,7 @@ export default function SignalsDashboard({ onSelectStock }: SignalsDashboardProp
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
+  const [showLogs, setShowLogs] = useState(false);
   const [filter, setFilter] = useState<'ALL' | 'BUY' | 'HOLD' | 'AVOID'>('ALL');
 
   const fetchSignals = useCallback(async () => {
@@ -157,10 +158,21 @@ export default function SignalsDashboard({ onSelectStock }: SignalsDashboardProp
       {error && <div className="dash-error">{error}</div>}
 
       {debugLogs.length > 0 && (
-        <div className="debug-logs">
-          {debugLogs.map((log, i) => (
-            <div key={i} className="log-line">• {log}</div>
-          ))}
+        <div className="mb-4 mt-4">
+          <button
+            onClick={() => setShowLogs(!showLogs)}
+            className="text-sm text-cyan-400 hover:text-cyan-300 mb-2"
+          >
+            {showLogs ? '🔽 Hide Logs' : '🔼 Show Logs'} ({debugLogs.length} entries)
+          </button>
+          
+          {showLogs && (
+            <div className="debug-logs max-h-64 overflow-y-auto text-xs">
+              {debugLogs.map((log, i) => (
+                <div key={i} className="log-line py-0.5">• {log}</div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

@@ -189,6 +189,14 @@ body {
   height: 100%;
 }
 
+.mt-4 {
+  margin-top: 1rem;
+}
+
+.mb-4 {
+  margin-bottom: 1rem;
+}
+
 .site-title {
   font-size: 1.5rem;
   font-weight: 700;
@@ -2739,4 +2747,24 @@ body {
   .wallet-summary-grid {
     grid-template-columns: repeat(2, 1fr);
   }
+}
+
+.debug-logs {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.log-line {
+  color: var(--text-secondary);
+  padding: 2px 0;
+}
+
+.log-line:hover {
+  color: var(--text-primary);
 }

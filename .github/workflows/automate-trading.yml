@@ -1,36 +1,35 @@
 name: Scheduled Trading Execution
-
 on:
   schedule:
-    # NSE market hours: 9:15 AM – 3:30 PM IST = 3:45 AM – 10:00 AM UTC
-    # Run every 5 minutes, Monday–Friday only
-    - cron: '*/5 4-9 * * 1-5'
-    # Also catch 10:00 AM UTC = 3:30 PM IST close
-    - cron: '0 10 * * 1-5'
-  workflow_dispatch: # Allows manual trigger from GitHub Dashboard
+    # Run every 5 minutes from 3:45 AM to 10:00 AM UTC (covers full NSE session)
+    # Minute 45 of hour 3, then every 5 min through hour 9, plus minute 0 of hour 10
+    - cron: '45 3 * * 1-5'   # First run at 3:45 UTC = 9:15 IST
+    - cron: '*/5 4-9 * * 1-5' # Every 5 min from 4:00-9:55 UTC
+    - cron: '0 10 * * 1-5'   # Final run at 10:00 UTC = 3:30 IST
+  workflow_dispatch: # Manual trigger for testing
 
 jobs:
   trigger-strategy:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-
     steps:
       - name: Trigger run-strategy API
         run: |
-          echo "Triggering strategy at $(date) UTC..."
-
+          echo "🚀 Triggering at $(date) UTC (~$(date -d '5 hours 30 minutes' '+%I:%M %p IST') IST)"
+          
           HTTP_STATUS=$(curl -s -o /tmp/response.json -w "%{http_code}" \
             -X POST "${{ secrets.NETLIFY_APP_URL }}/api/run-strategy" \
             -H "Content-Type: application/json" \
-            -d '{"bypassMarketFilter": false}' \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
             --max-time 90)
-
-          echo "--- HTTP Status: $HTTP_STATUS ---"
-          cat /tmp/response.json | python3 -m json.tool 2>/dev/null || cat /tmp/response.json
-
-          if [ "$HTTP_STATUS" != "200" ]; then
-            echo "::warning::Strategy run returned HTTP $HTTP_STATUS"
+          
+          echo "📡 HTTP Status: $HTTP_STATUS"
+          
+          if [ "$HTTP_STATUS" = "200" ]; then
+            echo "✅ Strategy executed successfully"
+            cat /tmp/response.json | python3 -m json.tool 2>/dev/null || cat /tmp/response.json
+          else
+            echo "❌ Strategy failed with status $HTTP_STATUS"
+            cat /tmp/response.json
             exit 1
           fi
-
-          echo "✅ Strategy run completed successfully"

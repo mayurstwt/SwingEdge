@@ -20,6 +20,9 @@ export async function POST() {
   return runStrategy();
 }
 
+console.log(`[STRATEGY] Run started at ${new Date().toISOString()} (IST: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })})`);
+
+
 async function runStrategy() {
   const logs: string[] = [];
   const supabase = getSupabaseAdmin();
@@ -62,7 +65,7 @@ async function runStrategy() {
 
         const currentPrice = closes[closes.length - 1];
         const currentHigh = highs[highs.length - 1];
-        
+
         // Update highest price if applicable (for trailing stop)
         if (trade.direction === "LONG" && currentHigh > (trade.highest_price ?? 0)) {
           await supabase
@@ -143,7 +146,7 @@ async function runStrategy() {
     // 🚫 LIMIT CHECKS
     // ================================
     const activeOpenTrades = openTrades?.filter(t => t.status === "OPEN") ?? [];
-    
+
     if (activeOpenTrades.length >= MAX_OPEN_TRADES) {
       logs.push("Max open trades reached");
       return NextResponse.json({ logs, openTrades: activeOpenTrades.length });
@@ -152,7 +155,7 @@ async function runStrategy() {
     const investedCapital = activeOpenTrades.reduce(
       (sum, t) => sum + (t.entry_price * t.quantity), 0
     );
-    
+
     if (investedCapital >= wallet.balance * MAX_CAPITAL_USAGE) {
       logs.push("Capital usage exceeds limit");
       return NextResponse.json({ logs, investedCapital, maxAllowed: wallet.balance * MAX_CAPITAL_USAGE });
@@ -169,7 +172,7 @@ async function runStrategy() {
 
     // Fallback to stocks.json if no signals in DB
     let stocks: Array<{ symbol: string; short_name?: string; sector?: string }> = [];
-    
+
     if (stocksData && stocksData.length > 0) {
       stocks = stocksData;
     } else {
@@ -245,11 +248,29 @@ async function runStrategy() {
       if (!marketBullish) {
         analysis.score = Math.max(0, analysis.score - 10);
         analysis.signals.push("Score adjusted -10 (bear market)");
-        
+
         if (analysis.score >= 70) analysis.decision = 'BUY';
         else if (analysis.score >= 50) analysis.decision = 'HOLD';
         else analysis.decision = 'AVOID';
       }
+
+      // Save signal to DB for reference (save all signals: BUY, HOLD, AVOID)
+      await supabase.from("signals").upsert({
+        symbol,
+        short_name: stock.short_name ?? symbol.replace('.NS', ''),
+        decision: analysis.decision,
+        score: analysis.score,
+        confidence: analysis.confidence,
+        price: analysis.price,
+        stop_loss: analysis.stopLoss,
+        target: analysis.target,
+        rsi: analysis.rsi,
+        trend: analysis.trend,
+        change_pct: analysis.changePercent,
+        reason: analysis.signals.join(', '),
+        run_date: new Date().toISOString().split('T')[0],
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'symbol,run_date' });
 
       // Skip weak signals
       if (analysis.decision !== "BUY" || analysis.confidence < MIN_CONFIDENCE) {
@@ -289,7 +310,7 @@ async function runStrategy() {
       // 📝 INSERT TRADE
       // ================================
       const direction: TradeDirection = "LONG";
-      
+
       const { error: insertError } = await supabase.from("trades").insert({
         symbol,
         short_name: stock.short_name ?? symbol.replace('.NS', ''),
@@ -328,36 +349,23 @@ async function runStrategy() {
       await updateWallet({ balance: availableCapital });
 
       logs.push(`${symbol}: LONG ${sizing.quantity} shares @ ₹${analysis.entry} (score: ${analysis.score})`);
-
-      // Save signal to DB for reference
-      await supabase.from("signals").upsert({
-        symbol,
-        short_name: stock.short_name ?? symbol.replace('.NS', ''),
-        decision: analysis.decision,
-        score: analysis.score,
-        confidence: analysis.confidence,
-        price: analysis.price,
-        stop_loss: analysis.stopLoss,
-        target: analysis.target,
-        rsi: analysis.rsi,
-        trend: analysis.trend,
-        change_pct: analysis.changePercent,
-        run_date: new Date().toISOString().split('T')[0],
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'symbol,run_date' });
     }
-
-    return NextResponse.json({ 
-      logs, 
+    return NextResponse.json({
+      logs,
+      executedAt: new Date().toISOString(),
+      executedAtIST: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
       openTrades: activeOpenTrades.length,
       availableCapital,
-      totalCapital: wallet.balance 
+      totalCapital: wallet.balance
     });
 
   } catch (err) {
     console.error("Strategy error:", err);
     return NextResponse.json({ error: "Strategy failed", logs }, { status: 500 });
   }
+
+
+
 }
 
 // ================================
