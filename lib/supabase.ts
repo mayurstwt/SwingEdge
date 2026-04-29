@@ -35,11 +35,6 @@ export function getSupabaseAdmin() {
 }
 
 // ================================
-// 📦 EXPORT: Backward-compatible admin instance
-// ================================
-export const supabase = getSupabaseAdmin();
-
-// ================================
 // 📋 DATABASE TYPES (match your schema.sql)
 // ================================
 
@@ -147,11 +142,3 @@ export type Tables = {
   daily_stats: DailyStatsRow;
   market_news: NewsRow;
 };
-
-// Helper for type-safe queries
-export function fromTable<T extends keyof Tables>(
-  client: ReturnType<typeof getSupabaseAdmin>,
-  table: T
-) {
-  return client.from(table);
-}

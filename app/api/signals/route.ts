@@ -6,11 +6,13 @@ export async function GET() {
   
   try {
     // First try to get signals from today
-    let { data: signals, error } = await supabase
+    const { data: initialSignals, error } = await supabase
       .from('signals')
       .select('*')
       .eq('run_date', today)
       .order('score', { ascending: false });
+    
+    let signals = initialSignals;
     
     if (error) throw error;
     

@@ -18,6 +18,8 @@ function normalizeCandleRows(rows: Array<Partial<Candle>>): Candle[] {
 /**
  * Get full OHLCV series for strategy analysis (ATR, RSI, MACD, etc.)
  */
+
+
 export async function getMarketDataFull(
   symbol: string,
   options?: { range?: string; interval?: string }

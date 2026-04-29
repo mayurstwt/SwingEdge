@@ -25,83 +25,9 @@ export interface Signal {
 }
 
 // ================================
-// 💰 TRADE MODEL (Execution Layer)
-// ================================
-export interface Trade {
-  id?: string;
-  symbol: string;
-  direction: TradeDirection;
-  entryPrice: number;
-  exitPrice?: number;
-  quantity: number;
-  stopLoss: number;
-  target: number;
-  status: TradeStatus;
-  pnl?: number;
-  createdAt?: string;
-  closedAt?: string;
-}
-
-// ================================
-// 💳 WALLET MODEL
-// ================================
-export interface Wallet {
-  balance: number;
-  usedMargin: number;
-  availableBalance: number;
-  updatedAt?: string;
-}
-
-// ================================
 // ⚠️ RISK CONFIG
 // ================================
 export type RiskTier = "CONSERVATIVE" | "NORMAL" | "AGGRESSIVE";
-export interface RiskConfig {
-  riskPerTrade: number;
-  maxCapitalUsage: number;
-  maxOpenTrades: number;
-}
-
-// ================================
-// 📊 ANALYSIS RESULT (Strategy Output)
-// ================================
-export interface AnalysisResult {
-  score: number;
-  decision: Decision;
-  confidence: number;
-  trend: string;
-  entry: number;
-  stopLoss: number;
-  target: number;
-  signals: string[];
-  price?: number;
-  change?: number;
-  changePercent?: number;
-  rsi?: number;
-  macd?: {
-    macdLine: number | null;
-    signalLine: number | null;
-    histogram: number | null;
-  };
-  sma50?: number | null;
-  sma200?: number | null;
-  bollingerBands?: {
-    upper: number | null;
-    middle: number | null;
-    lower: number | null;
-  };
-  entryZone?: { low: number; high: number };
-  riskReward?: number;
-  volumeRatio?: number;
-  priceHistory?: number[];
-  sma50History?: (number | null)[];
-  sma200History?: (number | null)[];
-}
-
-// ================================
-// 📉 MARKET REGIME
-// ================================
-export type MarketRegime = "BULL" | "BEAR" | "SIDEWAYS" | "VOLATILE";
 
 // ================================
 // 🕯️ CANDLE & HISTORICAL SERIES (for market-data.ts)
@@ -113,13 +39,6 @@ export interface Candle {
   low: number;
   close: number;
   volume: number;
-}
-
-export interface HistoricalSeries {
-  symbol: string;
-  shortName: string;
-  sector: string;
-  candles: Candle[];
 }
 
 // ================================
