@@ -86,7 +86,7 @@ export default function DailyNewsPanel() {
 
     const interval = setInterval(() => {
       fetchNews();
-    }, 15 * 60 * 1000);
+    }, 30 * 60 * 1000); // Auto-refresh every 30 minutes
 
     return () => clearInterval(interval);
   }, [fetchNews]);

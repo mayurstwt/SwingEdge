@@ -222,11 +222,13 @@ export default function Home() {
         </section>
       )}
 
-      {activeTab === 'news' && (
-        <section className="signals-tab-content" id="news-tab-content">
-          <DailyNewsPanel />
-        </section>
-      )}
+      <section
+        className="signals-tab-content"
+        id="news-tab-content"
+        style={{ display: activeTab === 'news' ? undefined : 'none' }}
+      >
+        <DailyNewsPanel />
+      </section>
 
       <footer className="site-footer" id="site-footer">
         <p>SwingEdge — Educational purposes only. Not financial advice.</p>

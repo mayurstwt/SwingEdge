@@ -1,6 +1,6 @@
 import { analyzeStock } from '@/lib/strategy';
 import { fetchYahooChart } from '@/lib/yahoo-finance';
-import { fetchHistoricalSeries, getMarketDataFull } from '@/lib/trading/market-data';
+import { getMarketDataFull } from '@/lib/trading/market-data';
 import type { AnalysisResult } from '@/lib/strategy';
 
 export async function GET(req: Request) {
