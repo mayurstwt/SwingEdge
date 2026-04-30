@@ -28,15 +28,12 @@ function adjustForDrawdown(equity: number, peakEquity: number): number {
   return 1;
 }
 
-// ================================
-// 📊 VOLATILITY ADJUSTMENT
-// ================================
 function adjustForVolatility(riskPerShare: number, price: number): number {
   const volatility = riskPerShare / price;
 
-  if (volatility > 0.04) return 0.5;   // very volatile → reduce size
-  if (volatility > 0.025) return 0.7;
-  if (volatility > 0.015) return 0.85;
+  if (volatility > 0.08) return 0.7;   // only extreme volatility
+  if (volatility > 0.06) return 0.85;
+  if (volatility > 0.04) return 0.95;
 
   return 1;
 }
