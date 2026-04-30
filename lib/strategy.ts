@@ -205,7 +205,7 @@ export function analyzeStock(
   // 💰 TRADE SETUP (per README rules)
   // ================================
   const entry = price;
-  const stopLoss = price - 1.5 * atr;
+  const stopLoss = price - 1.0 * atr;
   const target = price + 2.2 * atr;
   const riskReward = atr > 0 ? parseFloat(((target - entry) / (entry - stopLoss)).toFixed(2)) : 0;
 
