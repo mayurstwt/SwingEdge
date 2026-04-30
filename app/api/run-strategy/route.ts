@@ -268,7 +268,7 @@ async function runStrategy() {
           stopLoss: analysis.stopLoss,
           currentEquity: currentBalance,
           availableCash: availableCapital,
-          riskTier: "NORMAL",
+          riskTier: "AGGRESSIVE",
           strategyWeight: 1,
           capitalLimitPct: MAX_CAPITAL_USAGE,
         });
