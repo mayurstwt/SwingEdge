@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { analyzeStock } from "@/lib/strategy";
 import { getMarketDataFull } from "@/lib/trading/market-data";
 import { calculatePositionSize } from "@/lib/trading/risk";
@@ -7,28 +7,73 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 import type { TradeDirection } from "@/lib/trading/types";
 import NIFTY50 from "@/data/stocks.json";
 
+import { getOrCreateStrategyRun, updateStrategyRun } from "@/lib/idempotency";
+import { StrategyLogger } from "@/lib/logger";
+import { checkDrawdownLimit } from "@/lib/trading/drawdown";
+import { withTimeout } from "@/lib/timeout";
+import { retryWithBackoff } from "@/lib/retry";
+import { breaker } from "@/lib/circuit-breaker";
+
 const MAX_OPEN_TRADES = 5;
 const MAX_CAPITAL_USAGE = 0.9;
 const MIN_SCORE = 70; // BUY threshold
 const PARALLEL_BATCH_SIZE = 5; // fetch Yahoo Finance in parallel batches
 
+async function validateCron(req: NextRequest) {
+  const cronSecret = req.headers.get('x-cron-secret');
+  const expectedSecret = process.env.CRON_SECRET;
+  
+  if (!expectedSecret) {
+    return { error: 'Server not configured. Missing CRON_SECRET', status: 500 };
+  }
+  
+  if (cronSecret !== expectedSecret) {
+    return { error: 'Unauthorized. Invalid cron secret.', status: 401 };
+  }
+  return null;
+}
+
 // Handle both GET (cron) and POST (manual/dashboard) requests
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const authError = await validateCron(req);
+  if (authError) return NextResponse.json({ error: authError.error }, { status: authError.status });
   return runStrategy();
 }
 
-export async function POST() {
+export async function POST(req: NextRequest) {
+  const authError = await validateCron(req);
+  if (authError) return NextResponse.json({ error: authError.error }, { status: authError.status });
   return runStrategy();
 }
 
 async function runStrategy() {
-  const logs: string[] = [];
-  const supabase = getSupabaseAdmin();
+  const today = new Date().toISOString().split('T')[0];
+  const lockKey = `strategy_lock_${today}_${Math.floor(Date.now() / 60000) * 60000}`;
+  
+  const runStatus = await getOrCreateStrategyRun(lockKey);
+  if (!runStatus.isNewRun) {
+    return NextResponse.json({ skipped: true, reason: runStatus.reason });
+  }
+
+  const logger = new StrategyLogger(runStatus.runId);
+  logger.info(`Starting strategy run: ${lockKey}`);
+
+  let tradesOpened = 0;
+  let tradesClosed = 0;
 
   try {
+    const drawdown = await checkDrawdownLimit(20);
+    if (drawdown.breached) {
+      logger.error(`Drawdown limit breached: ${drawdown.drawdownPercent}%`, undefined, { currentEquity: drawdown.currentEquity });
+      await updateStrategyRun(runStatus.runId, { status: 'FAILED', error_message: 'Drawdown protection triggered' });
+      await logger.flush();
+      return NextResponse.json({ skipped: true, reason: 'Drawdown protection triggered', drawdown }, { status: 200 });
+    }
+
+    const supabase = getSupabaseAdmin();
     const wallet = await getWallet();
     if (!wallet) {
-      return NextResponse.json({ error: "Wallet not found" }, { status: 400 });
+      throw new Error("Wallet not found");
     }
 
     let availableCapital = wallet.balance;
@@ -42,8 +87,7 @@ async function runStrategy() {
       .eq("status", "OPEN");
 
     if (openTradesError) {
-      console.error("Open trades fetch error:", openTradesError);
-      return NextResponse.json({ error: "Failed to load open trades" }, { status: 500 });
+      throw new Error("Failed to load open trades");
     }
 
     const activeOpenTrades = openTrades ?? [];
@@ -53,74 +97,80 @@ async function runStrategy() {
     // ================================
     if (activeOpenTrades.length > 0) {
       for (const trade of activeOpenTrades) {
-        const { closes, highs } = await getMarketDataFull(trade.symbol, {
-          range: '1mo',
-          interval: '1d',
-        });
-
-        if (!closes.length) {
-          logs.push(`${trade.symbol}: no market data for exit check`);
-          continue;
-        }
-
-        const currentPrice = closes[closes.length - 1];
-        const currentHigh = highs[highs.length - 1];
-
-        // Update highest price for trailing stop
-        if (trade.direction === "LONG" && currentHigh > (trade.highest_price ?? 0)) {
-          await supabase
-            .from("trades")
-            .update({ highest_price: currentHigh })
-            .eq("id", trade.id);
-        }
-
-        let shouldClose = false;
-        let closeReason = "";
-
-        if (trade.direction === "LONG") {
-          if (currentPrice >= trade.target) {
-            shouldClose = true;
-            closeReason = "target hit";
-          } else if (trade.highest_price && trade.initial_stop_loss) {
-            const atr = trade.target - trade.entry_price;
-            const trailingStop = (trade.highest_price as number) - (1.5 * atr / 2.2);
-            if (currentPrice <= trailingStop) {
-              shouldClose = true;
-              closeReason = "trailing stop";
-            }
-          } else if (currentPrice <= trade.stop_loss) {
-            shouldClose = true;
-            closeReason = "stop loss";
-          }
-        }
-
-        if (shouldClose) {
-          const pnl = calculatePnL(
-            trade.direction as TradeDirection,
-            trade.entry_price,
-            currentPrice,
-            trade.quantity
+        try {
+          const { closes, highs } = await breaker.execute(
+            'yahoo-finance',
+            () => retryWithBackoff(() => withTimeout(getMarketDataFull(trade.symbol, { range: '1mo', interval: '1d' }), 15000, 'Yahoo Finance API')),
+            { threshold: 3, resetTimeoutMs: 300000 }
           );
 
-          const sellCharges = calculateSellCharges(currentPrice * trade.quantity);
-          const netPnL = pnl - sellCharges;
+          if (!closes.length) {
+            logger.warn(`${trade.symbol}: no market data for exit check`);
+            continue;
+          }
 
-          await supabase
-            .from("trades")
-            .update({
-              exit_price: currentPrice,
-              sell_price: currentPrice,
-              pnl: netPnL,
-              profit_loss: netPnL,
-              status: "CLOSED",
-              closed_at: new Date().toISOString(),
-            })
-            .eq("id", trade.id);
+          const currentPrice = closes[closes.length - 1];
+          const currentHigh = highs[highs.length - 1];
 
-          availableCapital += (currentPrice * trade.quantity) - sellCharges;
-          await updateWallet({ balance: availableCapital });
+          // Update highest price for trailing stop
+          if (trade.direction === "LONG" && currentHigh > (trade.highest_price ?? 0)) {
+            await supabase
+              .from("trades")
+              .update({ highest_price: currentHigh })
+              .eq("id", trade.id);
+          }
 
-          logs.push(`${trade.symbol}: closed at ₹${currentPrice} (${closeReason}, PnL: ₹${netPnL.toFixed(2)})`);
+          let shouldClose = false;
+          let closeReason = "";
+
+          if (trade.direction === "LONG") {
+            if (currentPrice >= trade.target) {
+              shouldClose = true;
+              closeReason = "target hit";
+            } else if (trade.highest_price && trade.initial_stop_loss) {
+              const atr = trade.target - trade.entry_price;
+              const trailingStop = (trade.highest_price as number) - (1.5 * atr / 2.2);
+              if (currentPrice <= trailingStop) {
+                shouldClose = true;
+                closeReason = "trailing stop";
+              }
+            } else if (currentPrice <= trade.stop_loss) {
+              shouldClose = true;
+              closeReason = "stop loss";
+            }
+          }
+
+          if (shouldClose) {
+            const pnl = calculatePnL(
+              trade.direction as TradeDirection,
+              trade.entry_price,
+              currentPrice,
+              trade.quantity
+            );
+
+            const sellCharges = calculateSellCharges(currentPrice * trade.quantity);
+            const netPnL = pnl - sellCharges;
+
+            await supabase
+              .from("trades")
+              .update({
+                exit_price: currentPrice,
+                sell_price: currentPrice,
+                pnl: netPnL,
+                profit_loss: netPnL,
+                status: "CLOSED",
+                closed_at: new Date().toISOString(),
+              })
+              .eq("id", trade.id);
+
+            availableCapital += (currentPrice * trade.quantity) - sellCharges;
+            await updateWallet({ balance: availableCapital });
+
+            logger.info(`${trade.symbol}: closed at ₹${currentPrice} (${closeReason}, PnL: ₹${netPnL.toFixed(2)})`);
+            tradesClosed++;
+          }
+        } catch (e) {
+          logger.error(`Error managing open trade for ${trade.symbol}`, e instanceof Error ? e : new Error(String(e)));
         }
       }
     }
@@ -138,8 +188,10 @@ async function runStrategy() {
     // 🚫 LIMIT CHECKS
     // ================================
     if (openTradeCount >= MAX_OPEN_TRADES) {
-      logs.push(`Max open trades reached (${openTradeCount}/${MAX_OPEN_TRADES})`);
-      return NextResponse.json({ logs, openTrades: openTradeCount });
+      logger.info(`Max open trades reached (${openTradeCount}/${MAX_OPEN_TRADES})`);
+      await updateStrategyRun(runStatus.runId, { status: 'SUCCESS', trades_opened: tradesOpened, trades_closed: tradesClosed });
+      await logger.flush();
+      return NextResponse.json({ openTrades: openTradeCount });
     }
 
     const { data: freshWallet } = await supabase
@@ -153,27 +205,29 @@ async function runStrategy() {
     // ================================
     let marketBullish = true;
     try {
-      const niftyData = await getMarketDataFull('^NSEI', { range: '3mo', interval: '1d' });
+      const niftyData = await breaker.execute(
+        'yahoo-finance',
+        () => retryWithBackoff(() => withTimeout(getMarketDataFull('^NSEI', { range: '3mo', interval: '1d' }), 15000)),
+        { threshold: 3, resetTimeoutMs: 300000 }
+      );
       if (niftyData.closes.length >= 30) {
         const niftyAnalysis = analyzeStock(niftyData.closes, niftyData.highs, niftyData.lows, niftyData.volumes);
         marketBullish = niftyAnalysis.trend === 'UPTREND';
-        if (!marketBullish) logs.push("⚠️ Market Bearish filter active (NIFTY downtrend)");
+        if (!marketBullish) logger.warn("⚠️ Market Bearish filter active (NIFTY downtrend)");
       }
     } catch (err) {
-      console.warn("NIFTY filter failed:", err);
+      logger.warn("NIFTY filter failed", err);
     }
 
     // ================================
     // 📊 STOCK UNIVERSE = Nifty 50 only
     // ================================
     const stocks = NIFTY50;
-    logs.push(`Scanning ${stocks.length} Nifty 50 stocks...`);
+    logger.info(`Scanning ${stocks.length} Nifty 50 stocks...`);
 
     // ================================
     // 🔁 ANALYZE STOCKS IN PARALLEL BATCHES
     // ================================
-    const today = new Date().toISOString().split('T')[0];
-
     for (let i = 0; i < stocks.length; i += PARALLEL_BATCH_SIZE) {
       const batch = stocks.slice(i, i + PARALLEL_BATCH_SIZE);
 
@@ -187,10 +241,11 @@ async function runStrategy() {
           }
 
           // Fetch market data
-          const { closes, highs, lows, volumes } = await getMarketDataFull(symbol, {
-            range: '1y',
-            interval: '1d',
-          });
+          const { closes, highs, lows, volumes } = await breaker.execute(
+            'yahoo-finance',
+            () => retryWithBackoff(() => withTimeout(getMarketDataFull(symbol, { range: '1y', interval: '1d' }), 15000)),
+            { threshold: 3, resetTimeoutMs: 300000 }
+          );
 
           if (!closes || closes.length < 50) {
             return { symbol, skipped: `insufficient data (${closes?.length ?? 0} bars)` };
@@ -214,13 +269,13 @@ async function runStrategy() {
       // Process results for this batch
       for (const result of results) {
         if (result.status === 'rejected') {
-          logs.push(`Batch error: ${result.reason}`);
+          logger.error(`Batch error: ${result.reason}`);
           continue;
         }
 
         const data = result.value;
         if ('skipped' in data) {
-          logs.push(`${data.symbol}: ${data.skipped}`);
+          logger.debug(`${data.symbol}: ${data.skipped}`);
           continue;
         }
 
@@ -230,7 +285,7 @@ async function runStrategy() {
           analysis: ReturnType<typeof analyzeStock>;
         };
 
-        // Save signal to DB (all decisions: BUY/HOLD/AVOID)
+        // Save signal to DB
         await supabase.from("signals").upsert({
           symbol,
           short_name: stock.name,
@@ -248,15 +303,15 @@ async function runStrategy() {
           updated_at: new Date().toISOString(),
         }, { onConflict: 'symbol,run_date' });
 
-        // Only open new trades for BUY signals with score >= 70
+        // Only open new trades for BUY signals with score >= MIN_SCORE
         if (analysis.decision !== "BUY" || analysis.score < MIN_SCORE) {
-          logs.push(`${symbol}: ${analysis.decision} (score: ${analysis.score})`);
+          logger.debug(`${symbol}: ${analysis.decision} (score: ${analysis.score})`);
           continue;
         }
 
         // Skip if already at max trades
         if (openSymbols.size >= MAX_OPEN_TRADES) {
-          logs.push(`${symbol}: BUY signal but max open trades reached`);
+          logger.debug(`${symbol}: BUY signal but max open trades reached`);
           continue;
         }
 
@@ -274,7 +329,7 @@ async function runStrategy() {
         });
 
         if (sizing.quantity <= 0) {
-          logs.push(`${symbol}: BUY rejected — sizing returned 0 (risk/capital limit)`);
+          logger.debug(`${symbol}: BUY rejected — sizing returned 0 (risk/capital limit)`);
           continue;
         }
 
@@ -283,7 +338,7 @@ async function runStrategy() {
         const totalCost = tradeValue + buyCharges;
 
         if (totalCost > availableCapital) {
-          logs.push(`${symbol}: BUY rejected — insufficient capital (need ₹${totalCost.toFixed(0)}, have ₹${availableCapital.toFixed(0)})`);
+          logger.debug(`${symbol}: BUY rejected — insufficient capital`);
           continue;
         }
 
@@ -320,8 +375,7 @@ async function runStrategy() {
         });
 
         if (insertError) {
-          console.error(`Insert failed for ${symbol}:`, insertError);
-          logs.push(`${symbol}: DB insert failed — ${insertError.message}`);
+          logger.error(`${symbol}: DB insert failed`, insertError);
           continue;
         }
 
@@ -329,12 +383,15 @@ async function runStrategy() {
         availableCapital -= totalCost;
         await updateWallet({ balance: availableCapital });
 
-        logs.push(`✅ ${symbol}: LONG ${sizing.quantity} shares @ ₹${analysis.entry} (score: ${analysis.score})`);
+        logger.info(`✅ ${symbol}: LONG ${sizing.quantity} shares @ ₹${analysis.entry} (score: ${analysis.score})`);
+        tradesOpened++;
       }
     }
 
+    await updateStrategyRun(runStatus.runId, { status: 'SUCCESS', trades_opened: tradesOpened, trades_closed: tradesClosed });
+    await logger.flush();
+
     return NextResponse.json({
-      logs,
       executedAt: new Date().toISOString(),
       executedAtIST: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
       openTrades: openSymbols.size,
@@ -343,8 +400,11 @@ async function runStrategy() {
     });
 
   } catch (err) {
-    console.error("Strategy error:", err);
-    return NextResponse.json({ error: "Strategy failed", logs }, { status: 500 });
+    const error = err instanceof Error ? err : new Error(String(err));
+    logger.error("Strategy failed", error);
+    await updateStrategyRun(runStatus.runId, { status: 'FAILED', error_message: error.message });
+    await logger.flush();
+    return NextResponse.json({ error: "Strategy failed" }, { status: 500 });
   }
 }
 

@@ -134,3 +134,46 @@ CREATE POLICY "anon_full_wallet"      ON wallet      FOR ALL USING (true);
 CREATE POLICY "anon_full_daily_stats" ON daily_stats FOR ALL USING (true);
 CREATE POLICY "anon_full_ledger"      ON ledger      FOR ALL USING (true);
 CREATE POLICY "anon_full_market_news" ON market_news FOR ALL USING (true);
+
+-- Strategy execution audit table
+CREATE TABLE IF NOT EXISTS strategy_runs (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  run_key text UNIQUE NOT NULL,
+  run_timestamp timestamptz NOT NULL,
+  status text NOT NULL DEFAULT 'PENDING' 
+    CHECK (status IN ('PENDING', 'SUCCESS', 'FAILED')),
+  error_message text,
+  trades_opened integer DEFAULT 0,
+  trades_closed integer DEFAULT 0,
+  market_conditions jsonb,
+  started_at timestamptz DEFAULT now(),
+  completed_at timestamptz,
+  duration_ms integer,
+  log_summary text
+);
+
+CREATE INDEX IF NOT EXISTS strategy_runs_started_at_idx ON strategy_runs(started_at DESC);
+CREATE INDEX IF NOT EXISTS strategy_runs_status_idx ON strategy_runs(status);
+CREATE INDEX IF NOT EXISTS strategy_runs_run_key_idx ON strategy_runs(run_key);
+
+-- Enable RLS
+ALTER TABLE strategy_runs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "anon_full_strategy_runs" ON strategy_runs FOR ALL USING (true);
+
+-- Trade logs table
+CREATE TABLE IF NOT EXISTS trade_logs (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  strategy_run_id uuid REFERENCES strategy_runs(id) ON DELETE CASCADE,
+  level text CHECK (level IN ('DEBUG', 'INFO', 'WARN', 'ERROR')),
+  message text NOT NULL,
+  symbol text,
+  action text,
+  score integer,
+  reason text,
+  metadata jsonb,
+  created_at timestamptz DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS trade_logs_strategy_run_idx ON trade_logs(strategy_run_id);
+CREATE INDEX IF NOT EXISTS trade_logs_level_idx ON trade_logs(level);
+CREATE INDEX IF NOT EXISTS trade_logs_created_at_idx ON trade_logs(created_at DESC);
