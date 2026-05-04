@@ -23,14 +23,28 @@ async function validateCron(req: NextRequest) {
   const cronSecret = req.headers.get('x-cron-secret');
   const expectedSecret = process.env.CRON_SECRET;
   
+  // 1. Allow in development environment
+  if (process.env.NODE_ENV === 'development') {
+    return null;
+  }
+
+  // 2. Allow if secret matches
+  if (expectedSecret && cronSecret === expectedSecret) {
+    return null;
+  }
+
+  // 3. Allow if request is from same origin (browser dashboard)
+  const host = req.headers.get('host');
+  const referer = req.headers.get('referer');
+  if (referer && host && referer.includes(host)) {
+    return null;
+  }
+  
   if (!expectedSecret) {
     return { error: 'Server not configured. Missing CRON_SECRET', status: 500 };
   }
   
-  if (cronSecret !== expectedSecret) {
-    return { error: 'Unauthorized. Invalid cron secret.', status: 401 };
-  }
-  return null;
+  return { error: 'Unauthorized. Invalid cron secret.', status: 401 };
 }
 
 // Handle both GET (cron) and POST (manual/dashboard) requests

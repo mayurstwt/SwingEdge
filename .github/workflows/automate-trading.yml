@@ -15,7 +15,7 @@ jobs:
     steps:
       - name: Trigger run-strategy API
         run: |
-          echo "🚀 Triggering at $(date) UTC (~$(date -d '5 hours 30 minutes' '+%I:%M %p IST') IST)"
+          echo "🚀 Triggering aGt $(date) UTC (~$(date -d '5 hours 30 minutes' '+%I:%M %p IST') IST)"
           
           HTTP_STATUS=$(curl -s -o /tmp/response.json -w "%{http_code}" \
             -X POST "${{ secrets.NETLIFY_APP_URL }}/api/run-strategy" \

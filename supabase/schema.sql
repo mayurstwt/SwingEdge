@@ -177,3 +177,39 @@ CREATE TABLE IF NOT EXISTS trade_logs (
 CREATE INDEX IF NOT EXISTS trade_logs_strategy_run_idx ON trade_logs(strategy_run_id);
 CREATE INDEX IF NOT EXISTS trade_logs_level_idx ON trade_logs(level);
 CREATE INDEX IF NOT EXISTS trade_logs_created_at_idx ON trade_logs(created_at DESC);
+
+-- =============================================
+-- 7. SUPABASE CRON (Automation Trigger)
+-- =============================================
+-- Enable extensions (Must be done by an admin/dashboard)
+-- CREATE EXTENSION IF NOT EXISTS pg_cron;
+-- CREATE EXTENSION IF NOT EXISTS pg_net;
+
+-- UNCOMMENT AND RUN IN SUPABASE SQL EDITOR AFTER SETTING YOUR_APP_URL AND YOUR_CRON_SECRET
+-- Every 5 minutes during NSE market hours (approx 9:15 AM - 3:30 PM IST)
+-- 9:15 IST = 3:45 UTC; 3:30 IST = 10:00 UTC
+
+SELECT cron.schedule(
+  'run-strategy-every-5-min',
+  '*/5 4-9 * * 1-5', -- Every 5 min from 4:00 AM to 9:55 AM UTC (Mon-Fri)
+  $$
+  SELECT net.http_post(
+    url := 'https://YOUR_APP_URL.netlify.app/api/run-strategy',
+    headers := '{"Content-Type": "application/json", "x-cron-secret": "YOUR_CRON_SECRET"}'::jsonb,
+    body := '{"bypassMarketFilter": false}'::jsonb
+  )
+  $$
+);
+
+SELECT cron.schedule(
+  'run-strategy-market-open',
+  '45 3 * * 1-5', -- NSE Market Open (9:15 AM IST)
+  $$
+  SELECT net.http_post(
+    url := 'https://YOUR_APP_URL.netlify.app/api/run-strategy',
+    headers := '{"Content-Type": "application/json", "x-cron-secret": "YOUR_CRON_SECRET"}'::jsonb,
+    body := '{"bypassMarketFilter": false}'::jsonb
+  )
+  $$
+);
+

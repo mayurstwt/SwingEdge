@@ -26,7 +26,7 @@ SwingEdge is a high-frequency algorithmic swing trading terminal for the NSE (Na
 - Side effects (DB updates, wallet modifications) are restricted to API routes (`app/api/*`) and `lib/wallet.ts`.
 
 ### 2.2 Automation Workflow
-- **Trigger**: GitHub Actions (`.github/workflows/daily-strategy.yml`) triggers `/api/run-strategy` every 5 minutes during market hours.
+- **Trigger**: Supabase Cron (`pg_cron`) triggers `/api/run-strategy` every 5 minutes during market hours via `pg_net` HTTP POST.
 - **Worker**: A local `scripts/worker.js` exists for dev/local testing.
 - **Orchestration**: `/api/run-strategy` is the "Brain". It loads stocks, analyzes them, checks open trades, manages trailing stops, and opens new positions.
 

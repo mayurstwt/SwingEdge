@@ -13,7 +13,10 @@ async function runStrategy() {
   try {
     const response = await fetch(API_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'x-cron-secret': process.env.CRON_SECRET || ''
+      },
       body: JSON.stringify({ bypassMarketFilter: false }),
     });
 
