@@ -13,6 +13,7 @@ import { checkDrawdownLimit } from "@/lib/trading/drawdown";
 import { withTimeout } from "@/lib/timeout";
 import { retryWithBackoff } from "@/lib/retry";
 import { breaker } from "@/lib/circuit-breaker";
+import { isMarketOpen, isTradingDay } from "@/lib/market-hours";
 
 const MAX_OPEN_TRADES = 5;
 const MAX_CAPITAL_USAGE = 0.9;
@@ -60,7 +61,54 @@ export async function POST(req: NextRequest) {
   return runStrategy();
 }
 
+/**
+ * Fetch the current live price for a symbol using intraday data.
+ * Falls back to the daily close if intraday data is unavailable.
+ */
+async function fetchLivePrice(symbol: string, fallbackPrice: number, logger: StrategyLogger): Promise<number> {
+  try {
+    const { closes } = await breaker.execute(
+      'yahoo-finance',
+      () => retryWithBackoff(() => withTimeout(
+        getMarketDataFull(symbol, { range: '1d', interval: '5m' }),
+        10000,
+        'Yahoo Finance intraday'
+      )),
+      { threshold: 3, resetTimeoutMs: 300000 }
+    );
+
+    if (closes.length > 0) {
+      const livePrice = closes[closes.length - 1];
+      logger.debug(`${symbol}: live price ₹${livePrice} (from ${closes.length} intraday bars)`);
+      return livePrice;
+    }
+  } catch (err) {
+    logger.warn(`${symbol}: intraday price fetch failed, using daily close ₹${fallbackPrice}`);
+  }
+  return fallbackPrice;
+}
+
 async function runStrategy() {
+  // ================================
+  // ⏰ MARKET HOURS GUARD
+  // ================================
+  // Allow signals to be generated on trading days even outside market hours,
+  // but only execute actual BUY trades during market hours.
+  // Buffer of 5 min allows the strategy to run at 9:10 AM (pre-market prep).
+  const marketStatus = await isMarketOpen(5);
+  const tradingDay = await isTradingDay();
+
+  if (!tradingDay) {
+    return NextResponse.json({
+      skipped: true,
+      reason: marketStatus.reason,
+      currentTimeIST: marketStatus.currentTimeIST,
+    });
+  }
+
+  // canTrade = market is open (with buffer); if false, we still generate signals but skip trade execution
+  const canExecuteTrades = marketStatus.isOpen;
+
   const today = new Date().toISOString().split('T')[0];
   const lockKey = `strategy_lock_${today}_${Math.floor(Date.now() / 60000) * 60000}`;
   
@@ -71,6 +119,7 @@ async function runStrategy() {
 
   const logger = new StrategyLogger(runStatus.runId);
   logger.info(`Starting strategy run: ${lockKey}`);
+  logger.info(`Market status: ${marketStatus.reason} | Can execute trades: ${canExecuteTrades}`);
 
   let tradesOpened = 0;
   let tradesClosed = 0;
@@ -323,6 +372,14 @@ async function runStrategy() {
           continue;
         }
 
+        // ================================
+        // ⏰ MARKET HOURS CHECK FOR TRADE EXECUTION
+        // ================================
+        if (!canExecuteTrades) {
+          logger.info(`${symbol}: BUY signal (score: ${analysis.score}) but market is closed — skipping trade execution`);
+          continue;
+        }
+
         // Skip if already at max trades
         if (openSymbols.size >= MAX_OPEN_TRADES) {
           logger.debug(`${symbol}: BUY signal but max open trades reached`);
@@ -330,11 +387,30 @@ async function runStrategy() {
         }
 
         // ================================
-        // 💰 POSITION SIZING
+        // 📈 FETCH LIVE PRICE FOR ENTRY
+        // ================================
+        const livePrice = await fetchLivePrice(symbol, analysis.entry, logger);
+
+        // Recalculate stop loss & target relative to the live price
+        // Keep the same ATR-based distance as the analysis
+        const atrDistance = analysis.target - analysis.entry; // 2.2 * ATR
+        const slDistance = analysis.entry - analysis.stopLoss; // 1.0 * ATR
+        const liveStopLoss = parseFloat((livePrice - slDistance).toFixed(2));
+        const liveTarget = parseFloat((livePrice + atrDistance).toFixed(2));
+
+        // Reject if live price deviates > 2% from analysis price (stale signal)
+        const priceDeviation = Math.abs(livePrice - analysis.entry) / analysis.entry;
+        if (priceDeviation > 0.02) {
+          logger.warn(`${symbol}: BUY rejected — live price ₹${livePrice} deviates ${(priceDeviation * 100).toFixed(1)}% from signal price ₹${analysis.entry}`);
+          continue;
+        }
+
+        // ================================
+        // 💰 POSITION SIZING (using live price)
         // ================================
         const sizing = calculatePositionSize({
-          price: analysis.entry,
-          stopLoss: analysis.stopLoss,
+          price: livePrice,
+          stopLoss: liveStopLoss,
           currentEquity: currentBalance,
           availableCash: availableCapital,
           riskTier: "AGGRESSIVE",
@@ -347,7 +423,7 @@ async function runStrategy() {
           continue;
         }
 
-        const tradeValue = analysis.entry * sizing.quantity;
+        const tradeValue = livePrice * sizing.quantity;
         const buyCharges = calculateBuyCharges(tradeValue);
         const totalCost = tradeValue + buyCharges;
 
@@ -357,7 +433,7 @@ async function runStrategy() {
         }
 
         // ================================
-        // 📝 INSERT TRADE
+        // 📝 INSERT TRADE (at live price)
         // ================================
         const direction: TradeDirection = "LONG";
 
@@ -366,12 +442,12 @@ async function runStrategy() {
           short_name: stock.name,
           sector: stock.sector,
           direction,
-          entry_price: analysis.entry,
-          buy_price: analysis.entry,
-          stop_loss: analysis.stopLoss,
-          target: analysis.target,
-          initial_stop_loss: analysis.stopLoss,
-          highest_price: analysis.entry,
+          entry_price: livePrice,
+          buy_price: livePrice,
+          stop_loss: liveStopLoss,
+          target: liveTarget,
+          initial_stop_loss: liveStopLoss,
+          highest_price: livePrice,
           quantity: sizing.quantity,
           charges: buyCharges,
           status: "OPEN",
@@ -397,7 +473,7 @@ async function runStrategy() {
         availableCapital -= totalCost;
         await updateWallet({ balance: availableCapital });
 
-        logger.info(`✅ ${symbol}: LONG ${sizing.quantity} shares @ ₹${analysis.entry} (score: ${analysis.score})`);
+        logger.info(`✅ ${symbol}: LONG ${sizing.quantity} shares @ ₹${livePrice} (live price, signal: ₹${analysis.entry}, score: ${analysis.score})`);
         tradesOpened++;
       }
     }
@@ -408,7 +484,11 @@ async function runStrategy() {
     return NextResponse.json({
       executedAt: new Date().toISOString(),
       executedAtIST: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
+      marketOpen: canExecuteTrades,
+      marketStatus: marketStatus.reason,
       openTrades: openSymbols.size,
+      tradesOpened,
+      tradesClosed,
       availableCapital,
       totalCapital: currentBalance,
     });
