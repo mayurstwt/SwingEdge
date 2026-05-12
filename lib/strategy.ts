@@ -185,6 +185,17 @@ export function analyzeStock(
     signals.push('Above average volume');
   }
 
+  // 8. Bollinger Bands = 20pts
+  if (bb.lower !== null && bb.upper !== null) {
+    if (price <= bb.lower * 1.05) {
+      score += 20;
+      signals.push('Price near lower Bollinger Band (potential bounce)');
+    } else if (bb.middle !== null && price > bb.middle) {
+      score += 10;
+      signals.push('Price above middle Bollinger Band');
+    }
+  }
+
   // Clamp score 0-100
   score = Math.max(0, Math.min(100, score));
 

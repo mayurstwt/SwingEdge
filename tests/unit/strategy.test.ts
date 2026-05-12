@@ -3,7 +3,6 @@ import { analyzeStock } from '@/lib/strategy';
 
 describe('Trading Strategy', () => {
   // Generate a mock uptrend prices array (250 days for indicators)
-  const uptrendPrices = Array.from({ length: 250 }, (_, i) => 100 + i * 0.5);
   const downtrendPrices = Array.from({ length: 250 }, (_, i) => 200 - i * 0.5);
 
   // Generate a mock healthy uptrend prices array (250 days)

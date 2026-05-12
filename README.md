@@ -143,4 +143,63 @@ SwingEdge now includes a `Daily News` tab beside `Live Analysis` and `Daily Sign
 SwingEdge is a **simulation platform**. It is for educational purposes only. It does not interface with real brokers and should not be used as financial advice.
 
 ---
-*Last Updated: 28 April 2026*
+*Last Updated: 12 May 2026*
+
+---
+
+## 10. Testing & Production Checklist
+
+### Pre-Production Command
+Before deploying to production, run the following unified verification command to ensure all types, linting rules, and tests pass:
+
+```bash
+npm run lint && npm run verify && npm run build
+```
+
+*(Note: `npm run verify` internally runs `vitest run` and the `scripts/sanity-check.js` script to validate Supabase & external API connectivity).*
+
+### Detailed Test Cases
+
+#### A. Core Services (`lib/indicators.ts`, `lib/strategy.ts`)
+1. **SMA & EMA Calculations:**
+   - *Test:* Feed array of constant prices.
+   - *Expected:* Moving averages exactly match the price.
+2. **RSI Calculation:**
+   - *Test:* Feed pure ascending prices, then pure descending prices.
+   - *Expected:* RSI evaluates near 100 for uptrend and near 0 for downtrend.
+3. **MACD Generation:**
+   - *Test:* Verify MACD line, Signal line, and Histogram align with known price trajectories (e.g., golden cross).
+   - *Expected:* Histogram outputs > 0 when MACD line > Signal line.
+4. **Scoring Logic (`analyzeStock`):**
+   - *Test:* Feed perfect bullish setup (Price > SMA200, SMA50 > SMA200, RSI between 50-70, MACD > 0, Price > SMA50, BB bounce, High Volume).
+   - *Expected:* Score calculates exactly to **100** points.
+   - *Test:* Feed a volatile downtrend pattern.
+   - *Expected:* Score evaluates < 50, triggering an **AVOID** decision.
+5. **NIFTY Market Filter:**
+   - *Test:* Manually set broad market to `DOWNTREND` regime.
+   - *Expected:* Strategy correctly applies a -10 point penalty.
+
+#### B. API & Trading Processes (`app/api/run-strategy/route.ts`)
+1. **Cron Security Check:**
+   - *Test:* Execute `GET /api/run-strategy` without `x-cron-secret` in production.
+   - *Expected:* Rejects request with `401 Unauthorized`.
+2. **Idempotency Guard:**
+   - *Test:* Trigger the strategy twice within the same minute.
+   - *Expected:* Second execution is aborted and returns `skipped: true`.
+3. **Capital limit & Position Sizing:**
+   - *Test:* Attempt a new BUY when `wallet.balance` < required trade amount or open trades >= `MAX_OPEN_TRADES`.
+   - *Expected:* Trade is logged as rejected due to limits.
+4. **Open Trade Trailing Stop Logic:**
+   - *Test:* Mock current price dipping below the dynamic `trailingStop`.
+   - *Expected:* Trade `status` is set to `CLOSED` and `pnl` is logged correctly.
+5. **Circuit Breaker & Fallback:**
+   - *Test:* Mock Yahoo Finance API failure.
+   - *Expected:* Circuit breaker trips after 3 failures; uses cached daily closes instead of intraday data.
+
+#### C. Wallet & PnL (`lib/wallet.ts`)
+1. **Buy/Sell Commission Calculations:**
+   - *Test:* Perform a paper trade of ₹1,00,000.
+   - *Expected:* Correct deduction of brokerage, STT, transaction charges, and GST.
+2. **Database Syncing:**
+   - *Test:* Complete a profitable `LONG` paper trade.
+   - *Expected:* Supabase `wallet` table reflects original balance + net PnL (profit minus charges).

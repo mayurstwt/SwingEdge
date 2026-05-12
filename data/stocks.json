@@ -30,7 +30,7 @@
   { "symbol": "CIPLA.NS", "name": "Cipla", "sector": "Pharma" },
   { "symbol": "EICHERMOT.NS", "name": "Eicher Motors", "sector": "Auto" },
   { "symbol": "HEROMOTOCO.NS", "name": "Hero MotoCorp", "sector": "Auto" },
-  { "symbol": "TATAMOTORS.NS", "name": "Tata Motors", "sector": "Auto" },
+  { "symbol": "TMCV.NS", "name": "Tata Motors CV", "sector": "Auto" },
   { "symbol": "M&M.NS", "name": "Mahindra & Mahindra", "sector": "Auto" },
   { "symbol": "TATACONSUM.NS", "name": "Tata Consumer Products", "sector": "FMCG" },
   { "symbol": "TATASTEEL.NS", "name": "Tata Steel", "sector": "Metals" },
@@ -48,5 +48,5 @@
   { "symbol": "BEL.NS", "name": "Bharat Electronics", "sector": "Defence" },
   { "symbol": "BRITANNIA.NS", "name": "Britannia Industries", "sector": "FMCG" },
   { "symbol": "TRENT.NS", "name": "Trent", "sector": "Retail" },
-  { "symbol": "ZOMATO.NS", "name": "Zomato", "sector": "Consumer Tech" }
+  { "symbol": "ETERNAL.NS", "name": "Eternal (Zomato)", "sector": "Consumer Tech" }
 ]

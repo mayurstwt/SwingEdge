@@ -7,7 +7,7 @@ interface LogEntry {
   action?: string;
   score?: number;
   reason?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 const supabase = createClient(
@@ -23,6 +23,17 @@ export class StrategyLogger {
     this.strategyRunId = strategyRunId;
   }
 
+  private formatMetadata(data?: unknown): Record<string, unknown> | undefined {
+    if (!data) return undefined;
+    if (data instanceof Error) {
+      return { error: data.message, stack: data.stack };
+    }
+    if (typeof data === 'object' && data !== null) {
+      return data as Record<string, unknown>;
+    }
+    return { data };
+  }
+
   log(entry: LogEntry) {
     this.logs.push(entry);
     
@@ -34,26 +45,26 @@ export class StrategyLogger {
     );
   }
 
-  debug(message: string, data?: any) {
-    this.log({ level: 'DEBUG', message, metadata: data });
+  debug(message: string, data?: unknown) {
+    this.log({ level: 'DEBUG', message, metadata: this.formatMetadata(data) });
   }
 
-  info(message: string, data?: any) {
-    this.log({ level: 'INFO', message, metadata: data });
+  info(message: string, data?: unknown) {
+    this.log({ level: 'INFO', message, metadata: this.formatMetadata(data) });
   }
 
-  warn(message: string, data?: any) {
-    this.log({ level: 'WARN', message, metadata: data });
+  warn(message: string, data?: unknown) {
+    this.log({ level: 'WARN', message, metadata: this.formatMetadata(data) });
   }
 
-  error(message: string, error?: Error, data?: any) {
+  error(message: string, error?: Error, data?: unknown) {
     this.log({
       level: 'ERROR',
       message,
       metadata: {
         error: error?.message,
         stack: error?.stack,
-        ...data,
+        ...this.formatMetadata(data),
       },
     });
   }

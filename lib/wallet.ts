@@ -1,5 +1,4 @@
 import { getSupabaseAdmin } from "./supabase";
-import { getMarketDataFull } from "./trading/market-data";
 import type { TradeDirection } from "./trading/types";
 
 // ================================

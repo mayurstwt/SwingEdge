@@ -60,8 +60,9 @@ export async function GET(req: Request) {
         );
 
         marketBullish = niftyAnalysis.trend === 'UPTREND';
+        const marketBearish = niftyAnalysis.trend === 'DOWNTREND';
 
-        if (!marketBullish) {
+        if (marketBearish) {
           marketAdjustment = -10;
           analysis.score = Math.max(0, analysis.score + marketAdjustment);
           analysis.signals.push('Score adjusted -10 (bear market / NIFTY downtrend)');

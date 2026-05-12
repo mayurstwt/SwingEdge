@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-export async function GET(req: NextRequest) {
+export async function GET(_req: NextRequest) {
   const checks = {
     supabase: false,
     env: false,
@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
 
     const { data } = await supabase.from('wallet').select('balance').limit(1);
     checks.supabase = !!data;
-  } catch (e) {
+  } catch (_e) {
     checks.supabase = false;
   }
 

@@ -82,7 +82,7 @@ async function fetchLivePrice(symbol: string, fallbackPrice: number, logger: Str
       logger.debug(`${symbol}: live price ₹${livePrice} (from ${closes.length} intraday bars)`);
       return livePrice;
     }
-  } catch (err) {
+  } catch (_err) {
     logger.warn(`${symbol}: intraday price fetch failed, using daily close ₹${fallbackPrice}`);
   }
   return fallbackPrice;
@@ -267,6 +267,7 @@ async function runStrategy() {
     // 🔁 NIFTY MARKET FILTER
     // ================================
     let marketBullish = true;
+    let marketBearish = false;
     try {
       const niftyData = await breaker.execute(
         'yahoo-finance',
@@ -276,10 +277,11 @@ async function runStrategy() {
       if (niftyData.closes.length >= 30) {
         const niftyAnalysis = analyzeStock(niftyData.closes, niftyData.highs, niftyData.lows, niftyData.volumes);
         marketBullish = niftyAnalysis.trend === 'UPTREND';
-        if (!marketBullish) logger.warn("⚠️ Market Bearish filter active (NIFTY downtrend)");
+        marketBearish = niftyAnalysis.trend === 'DOWNTREND';
+        if (marketBearish) logger.warn("⚠️ Market Bearish filter active (NIFTY downtrend)");
       }
-    } catch (err) {
-      logger.warn("NIFTY filter failed", err);
+    } catch (_err) {
+      logger.warn("NIFTY filter failed", _err);
     }
 
     // ================================
@@ -317,7 +319,7 @@ async function runStrategy() {
           const analysis = analyzeStock(closes, highs, lows, volumes);
 
           // Apply market filter penalty
-          if (!marketBullish) {
+          if (marketBearish) {
             analysis.score = Math.max(0, analysis.score - 10);
             analysis.signals.push("Score adjusted -10 (bear market)");
             if (analysis.score >= 70) analysis.decision = 'BUY';
