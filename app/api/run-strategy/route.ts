@@ -13,7 +13,7 @@ import { checkDrawdownLimit } from "@/lib/trading/drawdown";
 import { withTimeout } from "@/lib/timeout";
 import { retryWithBackoff } from "@/lib/retry";
 import { breaker } from "@/lib/circuit-breaker";
-import { isMarketOpen, isTradingDay } from "@/lib/market-hours";
+import { getISTNow, isMarketOpen, isTradingDay } from "@/lib/market-hours";
 
 const MAX_OPEN_TRADES = 5;
 const MAX_CAPITAL_USAGE = 0.9;
@@ -109,8 +109,11 @@ async function runStrategy() {
   // canTrade = market is open (with buffer); if false, we still generate signals but skip trade execution
   const canExecuteTrades = marketStatus.isOpen;
 
-  const today = new Date().toISOString().split('T')[0];
-  const lockKey = `strategy_lock_${today}_${Math.floor(Date.now() / 60000) * 60000}`;
+  const istNow = getISTNow();
+  const today = istNow.dateStr;
+  // Lock key is per 5-minute window — prevents duplicate runs within the same window
+  // but allows manual retries after 5 minutes if the previous run failed.
+  const lockKey = `strategy_lock_${today}_${Math.floor(Date.now() / (5 * 60000)) * (5 * 60000)}`;
   
   const runStatus = await getOrCreateStrategyRun(lockKey);
   if (!runStatus.isNewRun) {
@@ -191,7 +194,7 @@ async function runStrategy() {
               shouldClose = true;
               closeReason = "target hit";
             } else if (trade.highest_price && trade.initial_stop_loss) {
-              const atr = trade.target - trade.entry_price;
+              const atr = trade.target - trade.buy_price;
               const trailingStop = (trade.highest_price as number) - (1.5 * atr / 2.2);
               if (currentPrice <= trailingStop) {
                 shouldClose = true;
@@ -206,7 +209,7 @@ async function runStrategy() {
           if (shouldClose) {
             const pnl = calculatePnL(
               trade.direction as TradeDirection,
-              trade.entry_price,
+              trade.buy_price,
               currentPrice,
               trade.quantity
             );
@@ -217,7 +220,6 @@ async function runStrategy() {
             await supabase
               .from("trades")
               .update({
-                exit_price: currentPrice,
                 sell_price: currentPrice,
                 pnl: netPnL,
                 profit_loss: netPnL,
@@ -378,7 +380,7 @@ async function runStrategy() {
         // ⏰ MARKET HOURS CHECK FOR TRADE EXECUTION
         // ================================
         if (!canExecuteTrades) {
-          logger.info(`${symbol}: BUY signal (score: ${analysis.score}) but market is closed — skipping trade execution`);
+          logger.warn(`${symbol}: BUY signal (score: ${analysis.score}) but market is closed — reason: ${marketStatus.reason} | time: ${marketStatus.currentTimeIST}`);
           continue;
         }
 
@@ -400,10 +402,11 @@ async function runStrategy() {
         const liveStopLoss = parseFloat((livePrice - slDistance).toFixed(2));
         const liveTarget = parseFloat((livePrice + atrDistance).toFixed(2));
 
-        // Reject if live price deviates > 2% from analysis price (stale signal)
+        // Reject if live price deviates > 8% from analysis price (stale signal)
+        // Using 8% to account for normal intraday gap vs yesterday's daily close
         const priceDeviation = Math.abs(livePrice - analysis.entry) / analysis.entry;
-        if (priceDeviation > 0.02) {
-          logger.warn(`${symbol}: BUY rejected — live price ₹${livePrice} deviates ${(priceDeviation * 100).toFixed(1)}% from signal price ₹${analysis.entry}`);
+        if (priceDeviation > 0.08) {
+          logger.warn(`${symbol}: BUY rejected — live price ₹${livePrice} deviates ${(priceDeviation * 100).toFixed(1)}% from signal price ₹${analysis.entry} (threshold: 8%)`);
           continue;
         }
 
@@ -421,7 +424,7 @@ async function runStrategy() {
         });
 
         if (sizing.quantity <= 0) {
-          logger.debug(`${symbol}: BUY rejected — sizing returned 0 (risk/capital limit)`);
+          logger.debug(`${symbol}: BUY rejected — sizing returned 0 (risk/capital limit)`, { riskPerShare: sizing.riskPerShare, availableCash: availableCapital });
           continue;
         }
 
@@ -430,7 +433,7 @@ async function runStrategy() {
         const totalCost = tradeValue + buyCharges;
 
         if (totalCost > availableCapital) {
-          logger.debug(`${symbol}: BUY rejected — insufficient capital`);
+          logger.debug(`${symbol}: BUY rejected — insufficient capital (Cost: ₹${totalCost.toFixed(2)}, Available: ₹${availableCapital.toFixed(2)})`);
           continue;
         }
 
@@ -444,7 +447,6 @@ async function runStrategy() {
           short_name: stock.name,
           sector: stock.sector,
           direction,
-          entry_price: livePrice,
           buy_price: livePrice,
           stop_loss: liveStopLoss,
           target: liveTarget,

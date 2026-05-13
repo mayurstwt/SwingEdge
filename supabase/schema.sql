@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS trades (
   stop_loss        numeric(12, 2),
   target           numeric(12, 2),
   status           text DEFAULT 'OPEN' CHECK (status IN ('OPEN', 'CLOSED')),
+  direction        text DEFAULT 'LONG' CHECK (direction IN ('LONG', 'SHORT')),
   executed_by      text DEFAULT 'MANUAL' CHECK (executed_by IN ('MANUAL', 'AUTO')),
   reason           text,
   strategy_version text,
@@ -51,6 +52,7 @@ CREATE TABLE IF NOT EXISTS trades (
   initial_stop_loss numeric(12, 2),
   highest_price    numeric(12, 2),
   entry_score      integer,
+  pnl              numeric(12, 2),
   profit_loss      numeric(12, 2),
   opened_at        timestamptz DEFAULT now(),
   closed_at        timestamptz
@@ -106,6 +108,7 @@ CREATE INDEX IF NOT EXISTS market_news_symbols_idx ON market_news USING GIN(symb
 
 
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS entry_type text;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS direction text DEFAULT 'LONG' CHECK (direction IN ('LONG', 'SHORT'));
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS market_condition text;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS volume_strength text;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS risk_reward numeric(10, 2);
@@ -114,6 +117,7 @@ ALTER TABLE trades ADD COLUMN IF NOT EXISTS risk_tier text;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS partial_exit_count integer DEFAULT 0;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS initial_stop_loss numeric(12, 2);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS highest_price numeric(12, 2);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS pnl numeric(12, 2);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS entry_score integer;
 
 -- Seed current wallet if missing

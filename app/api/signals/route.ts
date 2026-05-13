@@ -1,11 +1,14 @@
 import { getSupabase } from '@/lib/supabase';
+import { getISTNow } from '@/lib/market-hours';
 
 export async function GET() {
   const supabase = getSupabase();
-  const today = new Date().toISOString().split('T')[0];
-  
+  const istNow = getISTNow();
+  const today = istNow.dateStr;
+
   try {
     // First try to get signals from today
+
     const { data: initialSignals, error } = await supabase
       .from('signals')
       .select('*')

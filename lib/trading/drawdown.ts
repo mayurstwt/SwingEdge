@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { getISTNow } from '@/lib/market-hours';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -6,7 +7,8 @@ const supabase = createClient(
 );
 
 export async function checkDrawdownLimit(maxDrawdownPercent: number = 20) {
-  const today = new Date().toISOString().split('T')[0];
+  const istNow = getISTNow();
+  const today = istNow.dateStr;
 
   // Get starting balance
   const { data: stats } = await supabase
@@ -18,6 +20,7 @@ export async function checkDrawdownLimit(maxDrawdownPercent: number = 20) {
   if (!stats) {
     return { breached: false, reason: 'No daily stats found' };
   }
+// ...
 
   // Get current equity
   const { data: wallet } = await supabase

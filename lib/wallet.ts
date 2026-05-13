@@ -112,7 +112,7 @@ export async function closeTrade(
   // 2. Calculate PnL
   const rawPnl = calculatePnL(
     (trade.direction as TradeDirection) || "LONG",
-    trade.entry_price,
+    trade.buy_price,
     exitPrice,
     trade.quantity
   );
@@ -129,7 +129,6 @@ export async function closeTrade(
   const { error: updateError } = await supabase
     .from("trades")
     .update({
-      exit_price: exitPrice,
       sell_price: exitPrice,
       pnl: netPnL,
       profit_loss: netPnL,

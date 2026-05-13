@@ -39,7 +39,7 @@ const HOLIDAY_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
  *
  * Returns: true if today is a holiday (no trading data), false otherwise.
  */
-async function isNSEHolidayToday(dateStr: string): Promise<boolean> {
+async function isNSEHolidayToday(dateStr: string, istHours: number, istMinutes: number): Promise<boolean> {
   // Return cached result if fresh
   if (
     holidayCheckCache &&
@@ -50,11 +50,7 @@ async function isNSEHolidayToday(dateStr: string): Promise<boolean> {
   }
 
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
-
     const result = await fetchYahooChart('^NSEI', '1d', '5m', 8000, 1);
-    clearTimeout(timer);
 
     const timestamps: number[] = result.timestamp ?? [];
 
@@ -65,12 +61,32 @@ async function isNSEHolidayToday(dateStr: string): Promise<boolean> {
       return istStr === dateStr;
     });
 
-    const isHoliday = todayTimestamps.length === 0;
+    let isHoliday = todayTimestamps.length === 0;
+
+    // Robustness: If 0 bars but it’s early in session (< 10:00 AM), don't flag as holiday.
+    // Yahoo Finance can be slow to publish bars in the first 30-45 min of trading.
+    const totalMinutes = istHours * 60 + istMinutes;
+    const tenAM = 10 * 60;
+    if (isHoliday && totalMinutes < tenAM) {
+      console.log(`⏰ Only ${todayTimestamps.length} bar(s) for ${dateStr} but it’s before 10:00 AM — not flagging as holiday yet`);
+      return false;
+    }
+
+    // Secondary check: regularMarketTime meta
+    if (isHoliday && result.meta?.regularMarketTime) {
+      const marketDate = new Date((result.meta.regularMarketTime as number) * 1000);
+      const marketDateStr = marketDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+      if (marketDateStr === dateStr) {
+        isHoliday = false; // It’s today, so not a holiday!
+      }
+    }
 
     holidayCheckCache = { dateStr, isHoliday, checkedAt: Date.now() };
 
     if (isHoliday) {
-      console.log(`📅 NSE holiday detected: no trading data for ${dateStr}`);
+      console.log(`📅 NSE holiday detected: no trading data for ${dateStr} (${todayTimestamps.length} bars after 10:00 AM)`);
+    } else {
+      console.log(`✅ NSE open: ${todayTimestamps.length} intraday bar(s) found for ${dateStr}`);
     }
 
     return isHoliday;
@@ -86,7 +102,7 @@ async function isNSEHolidayToday(dateStr: string): Promise<boolean> {
 // 🕐 IST TIME HELPERS
 // ================================
 
-function getISTNow(): { dateStr: string; hours: number; minutes: number; dayOfWeek: number } {
+export function getISTNow(): { dateStr: string; hours: number; minutes: number; dayOfWeek: number } {
   const now = new Date();
   // Build IST representation using Intl (handles IST correctly forever — India has no DST)
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -108,9 +124,9 @@ function getISTNow(): { dateStr: string; hours: number; minutes: number; dayOfWe
   const hours = parseInt(get('hour'));
   const minutes = parseInt(get('minute'));
 
-  // Day of week: use the IST date (not UTC date, which could differ near midnight)
-  const istDate = new Date(`${year}-${month}-${day}T00:00:00+05:30`);
-  const dayOfWeek = istDate.getDay(); // 0 = Sunday, 6 = Saturday
+  // Day of week: Use UTC date with IST year/month/day to get correct weekday regardless of server timezone
+  const istDate = new Date(`${year}-${month}-${day}T00:00:00Z`);
+  const dayOfWeek = istDate.getUTCDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
 
   return {
     dateStr: `${year}-${month}-${day}`,
@@ -175,9 +191,9 @@ export async function isMarketOpen(bufferMinutes: number = 0): Promise<MarketSta
     };
   }
 
-  // 3. Holiday check: probe Yahoo Finance for today's NIFTY data
+  // 3. Holiday check: probe Yahoo Finance for today’s NIFTY data
   //    Only runs on weekdays during market hours (most efficient)
-  const isHoliday = await isNSEHolidayToday(ist.dateStr);
+  const isHoliday = await isNSEHolidayToday(ist.dateStr, ist.hours, ist.minutes);
   if (isHoliday) {
     return {
       isOpen: false,
