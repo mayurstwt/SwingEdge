@@ -33,15 +33,22 @@ export async function GET(req: Request) {
     const meta = result.meta ?? {};
 
     // Calculate change from previous close
-    const price = closes[closes.length - 1];
+    // IMPORTANT: closes.at(-1) from a 1y/1d daily series is the last *completed*
+    // daily bar — which is yesterday's close when the market is still open today.
+    // Use meta.regularMarketPrice for the true live last-trade price instead.
+    const rawLivePrice = meta.regularMarketPrice;
+    const livePrice: number =
+      typeof rawLivePrice === 'number' && rawLivePrice > 0
+        ? rawLivePrice
+        : closes[closes.length - 1];
 
     // FIX: Properly type-check previousClose before using it in arithmetic
-    const rawPrevClose = meta.previousClose;
+    const rawPrevClose = meta.previousClose ?? meta.chartPreviousClose;
     const prevClose: number = typeof rawPrevClose === 'number' && !isNaN(rawPrevClose)
       ? rawPrevClose
-      : (closes[closes.length - 2] ?? price);
+      : (closes[closes.length - 2] ?? livePrice);
 
-    const change = price - prevClose;
+    const change = livePrice - prevClose;
     const changePercent = prevClose !== 0 ? (change / prevClose) * 100 : 0;
 
     // Apply market filter to match run-strategy logic
@@ -98,7 +105,7 @@ export async function GET(req: Request) {
       marketBullish,
       marketAdjustment,
       ...analysis,
-      price,
+      price: livePrice,
       change: parseFloat(change.toFixed(2)),
       changePercent: parseFloat(changePercent.toFixed(2)),
     };

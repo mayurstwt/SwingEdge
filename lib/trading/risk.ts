@@ -8,30 +8,81 @@ import type {
 // ⚙️ BASE RISK CONFIG
 // ================================
 const BASE_RISK_PCT: Record<RiskTier, number> = {
-  CONSERVATIVE: 0.005,   // 0.5%
-  NORMAL: 0.01,          // 1%
-  AGGRESSIVE: 0.015,     // 1.5%
+  CONSERVATIVE: 0.0075,  // 0.75%
+  NORMAL:       0.0125,  // 1.25%
+  AGGRESSIVE:   0.0200,  // 2.00%
 };
 
+/** Absolute ceiling: no single trade may risk more than 6% of equity. */
+const MAX_SINGLE_TRADE_RISK_PCT = 0.06;
+
 // ================================
-// 📉 DRAWdown PROTECTION
+// 🛡️ INPUT VALIDATION
+// ================================
+interface ValidationResult {
+  valid: boolean;
+  reason: string;
+}
+
+function validatePositionSizingInput(
+  input: PositionSizingInput & { peakEquity?: number }
+): ValidationResult {
+  if (!input.price || input.price <= 0) {
+    return { valid: false, reason: 'Invalid price' };
+  }
+
+  if (input.stopLoss >= input.price) {
+    return {
+      valid: false,
+      reason: `Stop loss (${input.stopLoss}) must be strictly below entry price (${input.price})`,
+    };
+  }
+
+  if (input.availableCash <= 0) {
+    return { valid: false, reason: 'No available cash' };
+  }
+
+  if (input.currentEquity <= 0) {
+    return { valid: false, reason: 'Invalid equity value' };
+  }
+
+  if (!BASE_RISK_PCT[input.riskTier]) {
+    return { valid: false, reason: `Invalid risk tier: ${input.riskTier}` };
+  }
+
+  if (input.capitalLimitPct <= 0 || input.capitalLimitPct > 1) {
+    return { valid: false, reason: `Invalid capitalLimitPct: ${input.capitalLimitPct}` };
+  }
+
+  if (input.strategyWeight <= 0) {
+    return { valid: false, reason: `Invalid strategyWeight: ${input.strategyWeight}` };
+  }
+
+  return { valid: true, reason: 'Valid' };
+}
+
+// ================================
+// 📉 DRAWDOWN PROTECTION
 // ================================
 function adjustForDrawdown(equity: number, peakEquity: number): number {
   if (!peakEquity || peakEquity <= 0) return 1;
 
   const drawdown = (peakEquity - equity) / peakEquity;
 
-  if (drawdown > 0.2) return 0.4;   // heavy loss → reduce risk hard
-  if (drawdown > 0.1) return 0.6;
-  if (drawdown > 0.05) return 0.8;
+  if (drawdown > 0.20) return 0.40;  // heavy drawdown → cut risk hard
+  if (drawdown > 0.10) return 0.60;
+  if (drawdown > 0.05) return 0.80;
 
   return 1;
 }
 
+// ================================
+// 📊 VOLATILITY ADJUSTMENT
+// ================================
 function adjustForVolatility(riskPerShare: number, price: number): number {
   const volatility = riskPerShare / price;
 
-  if (volatility > 0.08) return 0.7;   // only extreme volatility
+  if (volatility > 0.08) return 0.70;
   if (volatility > 0.06) return 0.85;
   if (volatility > 0.04) return 0.95;
 
@@ -44,11 +95,8 @@ function adjustForVolatility(riskPerShare: number, price: number): number {
 function isTradeValid(riskPerShare: number, price: number): boolean {
   const riskRatio = riskPerShare / price;
 
-  // Too tight SL → noise
-  if (riskRatio < 0.003) return false;
-
-  // Too wide SL → risky
-  if (riskRatio > 0.06) return false;
+  if (riskRatio < 0.003) return false;  // SL too tight → noise
+  if (riskRatio > 0.06)  return false;  // SL too wide  → excessive risk
 
   return true;
 }
@@ -57,14 +105,13 @@ function isTradeValid(riskPerShare: number, price: number): boolean {
 // 🧠 MAIN POSITION SIZING
 // ================================
 export function calculatePositionSize(
-  input: PositionSizingInput & {
-    peakEquity?: number;
-  }
+  input: PositionSizingInput & { peakEquity?: number }
 ): PositionSizingResult {
 
-  const riskPerShare = Math.abs(input.price - input.stopLoss);
-
-  if (riskPerShare <= 0 || input.price <= 0) {
+  // 1. Validate all inputs before any calculation
+  const validation = validatePositionSizingInput(input);
+  if (!validation.valid) {
+    console.warn(`calculatePositionSize: ${validation.reason}`);
     return {
       quantity: 0,
       riskAmount: 0,
@@ -73,9 +120,9 @@ export function calculatePositionSize(
     };
   }
 
-  // ================================
-  // 🚫 FILTER BAD TRADES
-  // ================================
+  const riskPerShare = Math.abs(input.price - input.stopLoss);
+
+  // 2. Reject pathological stop-loss placements
   if (!isTradeValid(riskPerShare, input.price)) {
     return {
       quantity: 0,
@@ -85,42 +132,55 @@ export function calculatePositionSize(
     };
   }
 
-  // ================================
-  // 📊 BASE RISK
-  // ================================
+  // 3. Base risk percentage for the chosen tier
   let riskPct = BASE_RISK_PCT[input.riskTier];
 
-  // ================================
-  // 📉 APPLY DRAWDOWN PROTECTION
-  // ================================
-  const ddFactor = adjustForDrawdown(
-    input.currentEquity,
-    input.peakEquity ?? input.currentEquity
-  );
+  // 4. Drawdown reduction
+  const ddFactor  = adjustForDrawdown(input.currentEquity, input.peakEquity ?? input.currentEquity);
 
-  // ================================
-  // 📊 APPLY VOLATILITY CONTROL
-  // ================================
+  // 5. Volatility reduction
   const volFactor = adjustForVolatility(riskPerShare, input.price);
 
-  // ================================
-  // 🎯 FINAL RISK %
-  // ================================
+  // 6. Final risk %
   riskPct = riskPct * ddFactor * volFactor * input.strategyWeight;
 
-  const riskAmount = input.currentEquity * riskPct;
+  let riskAmount = input.currentEquity * riskPct;
 
-  // ================================
-  // 📐 POSITION SIZE
-  // ================================
+  // 7. Hard cap: single-trade risk must not exceed 6% of equity
+  const maxRiskAmount = input.currentEquity * MAX_SINGLE_TRADE_RISK_PCT;
+  if (riskAmount > maxRiskAmount) {
+    console.warn(
+      `calculatePositionSize: risk capped at ${MAX_SINGLE_TRADE_RISK_PCT * 100}% of equity ` +
+      `(was ${(riskPct * 100).toFixed(2)}%)`
+    );
+    riskAmount = maxRiskAmount;
+  }
+
+  // 8. Sanity-check: reject if effective single-trade risk is still above cap
+  const effectiveSingleTradeRisk = riskAmount / input.currentEquity;
+  if (effectiveSingleTradeRisk > MAX_SINGLE_TRADE_RISK_PCT) {
+    console.warn(
+      `calculatePositionSize: single-trade risk (${(effectiveSingleTradeRisk * 100).toFixed(2)}%) ` +
+      `exceeds ${MAX_SINGLE_TRADE_RISK_PCT * 100}% limit — skipping trade`
+    );
+    return {
+      quantity: 0,
+      riskAmount: 0,
+      riskPerShare,
+      capitalCommitted: 0,
+    };
+  }
+
+  // 9. Quantity by risk
   const quantityByRisk = Math.floor(riskAmount / riskPerShare);
 
-  const maxCapital = input.availableCash * input.capitalLimitPct;
+  // 10. Quantity by capital limit
+  const maxCapital       = input.availableCash * input.capitalLimitPct;
   const quantityByCapital = Math.floor(maxCapital / input.price);
 
   let quantity = Math.min(quantityByRisk, quantityByCapital);
 
-  // 🚫 REMOVE FORCED TRADES (IMPORTANT)
+  // 11. Reject zero-quantity trades immediately
   if (quantity <= 0) {
     return {
       quantity: 0,
@@ -130,9 +190,7 @@ export function calculatePositionSize(
     };
   }
 
-  // ================================
-  // 💳 FINAL SAFETY CHECK
-  // ================================
+  // 12. Final safety: ensure we never exceed available cash
   if (quantity * input.price > input.availableCash) {
     quantity = Math.floor(input.availableCash / input.price);
   }
@@ -141,8 +199,8 @@ export function calculatePositionSize(
 
   return {
     quantity,
-    riskAmount: Number(riskAmount.toFixed(2)),
-    riskPerShare: Number(riskPerShare.toFixed(2)),
+    riskAmount:       Number(riskAmount.toFixed(2)),
+    riskPerShare:     Number(riskPerShare.toFixed(2)),
     capitalCommitted: Number((quantity * input.price).toFixed(2)),
   };
 }

@@ -12,6 +12,7 @@ interface NewsItem {
   link: string;
   published_at: string | null;
   symbols: string[];
+  fingerprint: string;
   relevance_score: number;
   related_to_open_trade: boolean;
 }
@@ -196,7 +197,7 @@ export default function DailyNewsPanel() {
       ) : (
         <div className="news-list">
           {filteredItems.map((item) => (
-            <article key={item.link} className={`news-card ${item.related_to_open_trade ? 'related' : ''}`}>
+            <article key={item.fingerprint} className={`news-card ${item.related_to_open_trade ? 'related' : ''}`}>
               <div className="news-card-top">
                 <div className="news-card-meta">
                   <span className={`decision-badge ${item.source_type === 'COMPANY' ? 'buy' : 'hold'}`}>

@@ -2,6 +2,64 @@ import { getSupabaseAdmin } from "./supabase";
 import type { TradeDirection } from "./trading/types";
 
 // ================================
+// 🔒 ATOMIC TRADE EXECUTION
+// ================================
+
+export interface AtomicTradeInput {
+  symbol: string;
+  quantity: number;
+  price: number;
+  stopLoss: number;
+  target: number;
+  shortName?: string;
+  sector?: string;
+  entryScore?: number;
+}
+
+export interface AtomicTradeResult {
+  tradeId: string;
+  newBalance: number;
+  capitalCommitted: number;
+}
+
+/**
+ * Executes a buy trade atomically via a Supabase SQL function.
+ * The database function locks the wallet row, validates balance and price
+ * levels, inserts the trade, and debits the wallet — all in one transaction.
+ * Throws if any validation fails (insufficient funds, bad price levels, etc.).
+ */
+export async function executeTradeAtomic(
+  input: AtomicTradeInput
+): Promise<AtomicTradeResult> {
+  const supabase = getSupabaseAdmin();
+
+  const { data, error } = await supabase.rpc('execute_trade_atomic', {
+    p_symbol:      input.symbol,
+    p_quantity:    input.quantity,
+    p_buy_price:   input.price,
+    p_stop_loss:   input.stopLoss,
+    p_target:      input.target,
+    p_short_name:  input.shortName  ?? null,
+    p_sector:      input.sector     ?? null,
+    p_entry_score: input.entryScore ?? null,
+  });
+
+  if (error) {
+    throw new Error(`Atomic trade execution failed: ${error.message}`);
+  }
+
+  if (!data || !data[0]) {
+    throw new Error('Atomic trade execution returned no result');
+  }
+
+  return {
+    tradeId:          data[0].trade_id,
+    newBalance:       data[0].new_balance,
+    capitalCommitted: data[0].capital_committed,
+  };
+}
+
+// ================================
 // 💰 GET WALLET
 // ================================
 export async function getWallet() {

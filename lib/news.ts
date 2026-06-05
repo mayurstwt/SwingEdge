@@ -406,7 +406,8 @@ export async function getNewsFeed(options: GetNewsOptions = {}): Promise<NewsRes
     Date.now() - new Date(cached.latestSync).getTime() < STALE_MS;
 
   if (cachedIsFresh) {
-    const items = tagRelatedItems(applyFilters(cached.items ?? [], options), openTradeSymbols);
+    const deduped = dedupeItems(cached.items ?? []);
+    const items = tagRelatedItems(applyFilters(deduped, options), openTradeSymbols);
 
     return {
       items,
@@ -420,7 +421,7 @@ export async function getNewsFeed(options: GetNewsOptions = {}): Promise<NewsRes
 
   const live = await fetchLatestFromSources();
   const persisted = live.items.length > 0 ? await saveNewsItems(live.items) : cached.usedPersistence;
-  const fallbackItems = live.items.length > 0 ? live.items : (cached.items ?? []);
+  const fallbackItems = live.items.length > 0 ? live.items : dedupeItems(cached.items ?? []);
   const updatedAt = live.items[0]?.synced_at ?? cached.latestSync ?? null;
 
   return {

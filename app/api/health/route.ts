@@ -1,46 +1,104 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { getSupabaseAdmin } from '@/lib/supabase';
 
-export async function GET(_req: NextRequest) {
-  const checks = {
-    supabase: false,
-    env: false,
-    timestamp: new Date().toISOString(),
-  };
+// ================================
+// 🏥 HEALTH CHECK ENDPOINT
+// ================================
+// Returns a detailed system-health snapshot:
+//   • Database connectivity & latency
+//   • Required environment variables
+//   • Node.js heap memory usage
+//   • Process uptime
+//
+// HTTP 200 → all checks healthy
+// HTTP 503 → one or more checks failed or degraded
 
-  // Check environment variables
+interface CheckResult {
+  status: 'healthy' | 'degraded' | 'unhealthy';
+  latency?: number;
+  message?: string;
+  [key: string]: unknown;
+}
+
+export async function GET(): Promise<Response> {
+  const startTime = Date.now();
+  const checks: Record<string, CheckResult> = {};
+
+  // ── 1. Database connectivity ──────────────────────────────────────────────
+  try {
+    const supabase = getSupabaseAdmin();
+    const dbStart = Date.now();
+
+    const { error } = await supabase
+      .from('wallet')
+      .select('balance')
+      .limit(1);
+
+    const dbLatency = Date.now() - dbStart;
+
+    checks.database = {
+      status:  error ? 'unhealthy' : 'healthy',
+      latency: dbLatency,
+      message: error ? error.message : 'Connected',
+    };
+  } catch (err) {
+    checks.database = {
+      status:  'unhealthy',
+      latency: Date.now() - startTime,
+      message: err instanceof Error ? err.message : 'Unknown error',
+    };
+  }
+
+  // ── 2. Required environment variables ─────────────────────────────────────
   const requiredEnv = [
     'NEXT_PUBLIC_SUPABASE_URL',
     'NEXT_PUBLIC_SUPABASE_ANON_KEY',
     'SUPABASE_SERVICE_ROLE_KEY',
     'CRON_SECRET',
   ];
+  const missingEnv = requiredEnv.filter(key => !process.env[key]);
 
-  checks.env = requiredEnv.every(key => process.env[key]);
+  checks.environment = {
+    status:  missingEnv.length === 0 ? 'healthy' : 'unhealthy',
+    message:
+      missingEnv.length === 0
+        ? 'All required env vars present'
+        : `Missing: ${missingEnv.join(', ')}`,
+  };
 
-  // Check Supabase connection
-  try {
-    const { createClient } = await import('@supabase/supabase-js');
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
+  // ── 3. Memory usage ───────────────────────────────────────────────────────
+  if (typeof process !== 'undefined' && process.memoryUsage) {
+    const mem       = process.memoryUsage();
+    const heapUsed  = Math.round(mem.heapUsed  / 1024 / 1024); // MB
+    const heapTotal = Math.round(mem.heapTotal / 1024 / 1024); // MB
+    const heapRatio = mem.heapUsed / mem.heapTotal;
 
-    const { data } = await supabase.from('wallet').select('balance').limit(1);
-    checks.supabase = !!data;
-  } catch (_e) {
-    checks.supabase = false;
+    checks.memory = {
+      status:     heapRatio > 0.90 ? 'degraded' : 'healthy',
+      heapUsedMB: heapUsed,
+      heapTotalMB: heapTotal,
+      heapRatioPct: Math.round(heapRatio * 100),
+      message:
+        heapRatio > 0.90
+          ? `High heap usage: ${Math.round(heapRatio * 100)}%`
+          : `Heap ${Math.round(heapRatio * 100)}% used`,
+    };
   }
 
-  const healthy = checks.env && checks.supabase;
+  // ── Overall status ────────────────────────────────────────────────────────
+  const allValues = Object.values(checks);
+  const overallStatus: 'healthy' | 'degraded' =
+    allValues.every(c => c.status === 'healthy') ? 'healthy' : 'degraded';
 
-  return NextResponse.json(
+  const totalLatency = Date.now() - startTime;
+
+  return Response.json(
     {
-      status: healthy ? 'ok' : 'degraded',
+      status:    overallStatus,
+      timestamp: new Date().toISOString(),
+      latency:   totalLatency,
+      uptime:    typeof process.uptime === 'function' ? Math.round(process.uptime()) : null,
       checks,
-      message: healthy
-        ? 'All systems operational'
-        : 'Some checks failed',
     },
-    { status: healthy ? 200 : 503 }
+    { status: overallStatus === 'healthy' ? 200 : 503 }
   );
 }

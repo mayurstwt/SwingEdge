@@ -65,6 +65,7 @@ The system must remain **Conservative**.
 | `trades` | Paper trading ledger | `buy_price`, `status` (OPEN/CLOSED), `pnl` |
 | `wallet` | Virtual bank | `balance`, `updated_at` |
 | `market_news` | Cached Daily News feed | `source`, `title`, `link`, `symbols`, `published_at` |
+| `trade_tips` | Multi-factor trade ideas | `tip_type`, `composite_score`, `suggested_price`, `status` |
 
 ---
 
@@ -144,6 +145,32 @@ SwingEdge is a **simulation platform**. It is for educational purposes only. It 
 
 ---
 *Last Updated: 12 May 2026*
+
+---
+
+## 9A. Smart Trade Tips
+
+SwingEdge now includes a `Smart Tips` tab beside `Daily News`.
+
+### What it does
+- Reuses the existing technical score from `signals`.
+- Adds a market-context modifier from the NIFTY trend.
+- Adds a cached-news sentiment modifier from `market_news`.
+- Sizes ideas with the existing conservative risk engine.
+- Stores suggestions in `trade_tips` and lets the user either ignore them or open a paper trade directly.
+
+### Core files
+- Added: `app/components/SmartTipsPanel.tsx`
+- Added: `app/api/tips/route.ts`
+- Added: `app/api/tips/generate/route.ts`
+- Added: `app/api/tips/[id]/action/route.ts`
+- Added: `lib/tips.ts`
+- Added: `tests/unit/tips.test.ts`
+- Changed: `app/api/run-strategy/route.ts`
+- Changed: `app/page.tsx`
+- Changed: `app/globals.css`
+- Changed: `lib/supabase.ts`
+- Changed: `supabase/schema.sql`
 
 ---
 

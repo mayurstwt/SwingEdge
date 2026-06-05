@@ -130,6 +130,33 @@ export interface NewsRow {
   created_at?: string;
 }
 
+export interface TradeTipRow {
+  id: string;
+  symbol: string;
+  short_name?: string | null;
+  sector?: string | null;
+  tip_type: 'STRONG_BUY' | 'MODERATE_BUY' | 'WATCH';
+  composite_score: number;
+  suggested_price: number;
+  suggested_qty: number;
+  stop_loss?: number | null;
+  target?: number | null;
+  risk_reward?: number | null;
+  technical_score?: number | null;
+  market_context?: number | null;
+  news_sentiment?: number | null;
+  news_headlines?: string[] | null;
+  reasoning: string;
+  status: 'ACTIVE' | 'TRIGGERED' | 'EXPIRED' | 'CANCELLED';
+  triggered_at?: string | null;
+  triggered_price?: number | null;
+  user_action?: 'BUY' | 'IGNORE' | 'EXPIRED' | null;
+  run_id?: string | null;
+  created_at?: string;
+  expires_at?: string | null;
+  notified?: boolean | null;
+}
+
 // ================================
 // 🔧 TYPE-SAFE TABLE HELPERS
 // ================================
@@ -141,4 +168,5 @@ export type Tables = {
   wallet: WalletRow;
   daily_stats: DailyStatsRow;
   market_news: NewsRow;
+  trade_tips: TradeTipRow;
 };

@@ -8,6 +8,7 @@ import StockCard from './components/StockCard';
 import SignalsDashboard from './components/SignalsDashboard';
 import WalletPanel from './components/WalletPanel';
 import DailyNewsPanel from './components/DailyNewsPanel';
+import SmartTipsPanel from './components/SmartTipsPanel';
 import type { AnalysisResult } from '@/lib/strategy';
 
 const PriceChart = dynamic(() => import('./components/PriceChart'), { ssr: false });
@@ -18,7 +19,7 @@ type StockData = AnalysisResult & {
   currency: string;
 };
 
-type MainTab = 'live' | 'signals' | 'news';
+type MainTab = 'live' | 'signals' | 'news' | 'tips';
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<MainTab>('signals');
@@ -127,6 +128,15 @@ export default function Home() {
           Daily News
           <span className="tab-badge">FREE</span>
         </button>
+        <button
+          id="tab-tips"
+          className={`main-tab ${activeTab === 'tips' ? 'active' : ''}`}
+          onClick={() => setActiveTab('tips')}
+        >
+          <span className="tab-icon">💡</span>
+          Smart Tips
+          <span className="tab-badge">AI</span>
+        </button>
       </nav>
 
       {/* ═══════════════════════════════════════
@@ -228,6 +238,14 @@ export default function Home() {
         style={{ display: activeTab === 'news' ? undefined : 'none' }}
       >
         <DailyNewsPanel />
+      </section>
+
+      <section
+        className="signals-tab-content"
+        id="tips-tab-content"
+        style={{ display: activeTab === 'tips' ? undefined : 'none' }}
+      >
+        <SmartTipsPanel />
       </section>
 
       <footer className="site-footer" id="site-footer">

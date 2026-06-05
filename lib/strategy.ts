@@ -130,8 +130,15 @@ export function analyzeStock(
     score += 10;
     signals.push('RSI neutral (30-50)');
   } else if (rsi < 30) {
-    score += 15;
-    signals.push('RSI oversold (<30) - potential bounce');
+    // Only treat oversold as positive when price is above SMA200 (uptrend bounce)
+    // Below SMA200 = falling knife — do NOT reward it
+    if (sma200 !== null && price > sma200) {
+      score += 10;
+      signals.push('RSI oversold (<30) in uptrend - potential bounce');
+    } else {
+      score += 2;
+      signals.push('RSI oversold (<30) in downtrend - caution');
+    }
   } else if (rsi >= 70) {
     score += 5;
     signals.push('RSI overbought (>70) - caution');
@@ -202,23 +209,51 @@ export function analyzeStock(
   // ================================
   // 🎯 DECISION THRESHOLDS (per README)
   // ================================
-  let decision: Decision = 'AVOID';
-
-  if (score >= 70) {
-    decision = 'BUY';
-  } else if (score >= 50) {
-    decision = 'HOLD';
-  } else {
-    decision = 'AVOID';
-  }
+  const decision: Decision =
+    score >= 70 ? 'BUY' :
+    score >= 50 ? 'HOLD' :
+    'AVOID';
 
   // ================================
   // 💰 TRADE SETUP (per README rules)
   // ================================
   const entry = price;
-  const stopLoss = price - 1.0 * atr;
-  const target = price + 2.2 * atr;
-  const riskReward = atr > 0 ? parseFloat(((target - entry) / (entry - stopLoss)).toFixed(2)) : 0;
+  // Use 1.5×ATR for stop — 1.0×ATR is inside daily noise range for Nifty50 stocks
+  // and gets triggered within the first hour of trading almost every day.
+  // 3.0×ATR target keeps R:R at exactly 2.0 which is break-even at 34% win rate.
+  const stopLoss = price - 1.5 * atr;
+  const target = price + 3.0 * atr;
+
+  // Guard: validate price levels before computing risk-reward
+  if (stopLoss >= entry || target <= entry) {
+    console.warn(`analyzeStock: invalid price levels — entry=${entry}, stop=${stopLoss}, target=${target}`);
+    return {
+      score: 0,
+      decision: 'AVOID',
+      confidence: 0,
+      trend: 'SIDEWAYS',
+      entry,
+      stopLoss: parseFloat((entry * 0.95).toFixed(2)),
+      target: parseFloat((entry * 1.05).toFixed(2)),
+      signals: ['ERROR: Invalid ATR-based price levels'],
+      price,
+      rsi,
+      macd,
+      sma50,
+      sma200,
+      bollingerBands: bb,
+      entryZone: { low: parseFloat((price * 0.985).toFixed(2)), high: parseFloat((price * 1.01).toFixed(2)) },
+      riskReward: 1,
+      volumeRatio: volRatio,
+      priceHistory: prices.slice(-120),
+      sma50History: sma50Arr.slice(-120),
+      sma200History: sma200Arr.slice(-120),
+    };
+  }
+
+  // Clamp risk-reward to reasonable bounds [0.5, 10]
+  const rawRiskReward = atr > 0 ? (target - entry) / (entry - stopLoss) : 1;
+  const riskReward = Math.max(0.5, Math.min(10, parseFloat(rawRiskReward.toFixed(2))));
 
   // Entry zone: small buffer around current price
   const entryZone = {

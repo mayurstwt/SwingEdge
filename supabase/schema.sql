@@ -105,6 +105,38 @@ CREATE INDEX IF NOT EXISTS market_news_published_idx ON market_news(published_at
 CREATE INDEX IF NOT EXISTS market_news_source_type_idx ON market_news(source_type);
 CREATE INDEX IF NOT EXISTS market_news_symbols_idx ON market_news USING GIN(symbols);
 
+-- 7. Smart trade tips
+CREATE TABLE IF NOT EXISTS trade_tips (
+  id              uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  symbol          text NOT NULL,
+  short_name      text,
+  sector          text,
+  tip_type        text NOT NULL CHECK (tip_type IN ('STRONG_BUY', 'MODERATE_BUY', 'WATCH')),
+  composite_score integer NOT NULL,
+  suggested_price numeric(12, 2) NOT NULL,
+  suggested_qty   integer NOT NULL,
+  stop_loss       numeric(12, 2),
+  target          numeric(12, 2),
+  risk_reward     numeric(6, 2),
+  technical_score integer,
+  market_context  integer,
+  news_sentiment  integer,
+  news_headlines  text[] DEFAULT '{}',
+  reasoning       text NOT NULL,
+  status          text DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'TRIGGERED', 'EXPIRED', 'CANCELLED')),
+  triggered_at    timestamptz,
+  triggered_price numeric(12, 2),
+  user_action     text CHECK (user_action IN ('BUY', 'IGNORE', 'EXPIRED')),
+  run_id          uuid,
+  created_at      timestamptz DEFAULT now(),
+  expires_at      timestamptz,
+  notified        boolean DEFAULT false
+);
+
+CREATE INDEX IF NOT EXISTS trade_tips_status_idx ON trade_tips(status);
+CREATE INDEX IF NOT EXISTS trade_tips_symbol_idx ON trade_tips(symbol);
+CREATE INDEX IF NOT EXISTS trade_tips_created_idx ON trade_tips(created_at DESC);
+
 
 
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS entry_type text;
@@ -131,6 +163,7 @@ ALTER TABLE wallet      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE daily_stats ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ledger      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE market_news  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE trade_tips  ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "anon_full_signals"     ON signals     FOR ALL USING (true);
 CREATE POLICY "anon_full_trades"      ON trades      FOR ALL USING (true);
@@ -138,6 +171,7 @@ CREATE POLICY "anon_full_wallet"      ON wallet      FOR ALL USING (true);
 CREATE POLICY "anon_full_daily_stats" ON daily_stats FOR ALL USING (true);
 CREATE POLICY "anon_full_ledger"      ON ledger      FOR ALL USING (true);
 CREATE POLICY "anon_full_market_news" ON market_news FOR ALL USING (true);
+CREATE POLICY "anon_full_trade_tips"  ON trade_tips  FOR ALL USING (true);
 
 -- Strategy execution audit table
 CREATE TABLE IF NOT EXISTS strategy_runs (
@@ -159,6 +193,21 @@ CREATE TABLE IF NOT EXISTS strategy_runs (
 CREATE INDEX IF NOT EXISTS strategy_runs_started_at_idx ON strategy_runs(started_at DESC);
 CREATE INDEX IF NOT EXISTS strategy_runs_status_idx ON strategy_runs(status);
 CREATE INDEX IF NOT EXISTS strategy_runs_run_key_idx ON strategy_runs(run_key);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.table_constraints
+    WHERE constraint_name = 'trade_tips_run_id_fkey'
+      AND table_name = 'trade_tips'
+  ) THEN
+    ALTER TABLE trade_tips
+      ADD CONSTRAINT trade_tips_run_id_fkey
+      FOREIGN KEY (run_id) REFERENCES strategy_runs(id) ON DELETE SET NULL;
+  END IF;
+END
+$$;
 
 -- Enable RLS
 ALTER TABLE strategy_runs ENABLE ROW LEVEL SECURITY;
@@ -217,3 +266,128 @@ SELECT cron.schedule(
   $$
 );
 
+SELECT cron.schedule(
+  'expire-trade-tips-daily',
+  '30 22 * * *',
+  $$
+  UPDATE trade_tips
+  SET
+    status = 'EXPIRED',
+    user_action = COALESCE(user_action, 'EXPIRED')
+  WHERE status = 'ACTIVE'
+    AND expires_at IS NOT NULL
+    AND expires_at < now()
+  $$
+);
+
+-- =============================================
+-- 8. ATOMIC TRADE EXECUTION FUNCTION
+-- =============================================
+-- Executes a buy trade atomically:
+--   1. Locks the wallet row (FOR UPDATE)
+--   2. Validates balance and price levels
+--   3. Inserts trade with OPEN status
+--   4. Debits wallet balance
+-- All steps run in a single transaction — no partial state possible.
+
+CREATE OR REPLACE FUNCTION execute_trade_atomic(
+  p_symbol       TEXT,
+  p_quantity     INTEGER,
+  p_buy_price    DECIMAL,
+  p_stop_loss    DECIMAL,
+  p_target       DECIMAL,
+  p_short_name   TEXT    DEFAULT NULL,
+  p_sector       TEXT    DEFAULT NULL,
+  p_entry_score  INTEGER DEFAULT NULL
+) RETURNS TABLE(
+  trade_id          UUID,
+  new_balance       DECIMAL,
+  capital_committed DECIMAL
+) AS $$
+DECLARE
+  v_wallet_balance DECIMAL;
+  v_total_cost     DECIMAL;
+  v_trade_id       UUID;
+BEGIN
+  -- Lock the single wallet row so concurrent calls cannot double-spend
+  SELECT balance INTO v_wallet_balance
+  FROM wallet
+  WHERE id = 1
+  FOR UPDATE;
+
+  -- Ensure wallet exists
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Wallet not found';
+  END IF;
+
+  v_total_cost := p_quantity * p_buy_price;
+
+  -- Validate sufficient balance
+  IF v_wallet_balance < v_total_cost THEN
+    RAISE EXCEPTION 'Insufficient balance: need %.2f, have %.2f',
+      v_total_cost, v_wallet_balance;
+  END IF;
+
+  -- Validate stop loss is strictly below entry
+  IF p_stop_loss >= p_buy_price THEN
+    RAISE EXCEPTION 'Stop loss (%.2f) must be below entry price (%.2f)',
+      p_stop_loss, p_buy_price;
+  END IF;
+
+  -- Validate target is strictly above entry
+  IF p_target <= p_buy_price THEN
+    RAISE EXCEPTION 'Target (%.2f) must be above entry price (%.2f)',
+      p_target, p_buy_price;
+  END IF;
+
+  -- Insert trade
+  INSERT INTO trades (
+    symbol,
+    short_name,
+    sector,
+    buy_price,
+    stop_loss,
+    target,
+    initial_stop_loss,
+    highest_price,
+    quantity,
+    direction,
+    status,
+    executed_by,
+    entry_score,
+    pnl,
+    profit_loss,
+    opened_at
+  ) VALUES (
+    p_symbol,
+    p_short_name,
+    p_sector,
+    p_buy_price,
+    p_stop_loss,
+    p_target,
+    p_stop_loss,
+    p_buy_price,
+    p_quantity,
+    'LONG',
+    'OPEN',
+    'AUTO',
+    p_entry_score,
+    0,
+    0,
+    NOW()
+  ) RETURNING id INTO v_trade_id;
+
+  -- Debit wallet atomically
+  UPDATE wallet
+  SET
+    balance    = balance - v_total_cost,
+    updated_at = NOW()
+  WHERE id = 1;
+
+  -- Return results to the caller
+  RETURN QUERY SELECT
+    v_trade_id,
+    (v_wallet_balance - v_total_cost)::DECIMAL,
+    v_total_cost::DECIMAL;
+END;
+$$ LANGUAGE plpgsql;

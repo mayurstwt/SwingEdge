@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { analyzeStock } from "@/lib/strategy";
 import { getMarketDataFull } from "@/lib/trading/market-data";
+import { fetchYahooChart } from "@/lib/yahoo-finance";
 import { calculatePositionSize } from "@/lib/trading/risk";
 import { getWallet, updateWallet, calculatePnL } from "@/lib/wallet";
 import { getSupabaseAdmin } from "@/lib/supabase";
@@ -14,10 +15,11 @@ import { withTimeout } from "@/lib/timeout";
 import { retryWithBackoff } from "@/lib/retry";
 import { breaker } from "@/lib/circuit-breaker";
 import { getISTNow, isMarketOpen, isTradingDay } from "@/lib/market-hours";
+import { expireTradeTips, generateTipsForCandidates, persistTradeTips, type TipCandidate } from "@/lib/tips";
 
 const MAX_OPEN_TRADES = 5;
 const MAX_CAPITAL_USAGE = 0.9;
-const MIN_SCORE = 70; // BUY threshold
+const MIN_SCORE = 75; // BUY threshold — raised from 70: fewer but higher-quality signals
 const PARALLEL_BATCH_SIZE = 5; // fetch Yahoo Finance in parallel batches
 
 async function validateCron(req: NextRequest) {
@@ -82,7 +84,7 @@ async function fetchLivePrice(symbol: string, fallbackPrice: number, logger: Str
       logger.debug(`${symbol}: live price ₹${livePrice} (from ${closes.length} intraday bars)`);
       return livePrice;
     }
-  } catch (_err) {
+  } catch {
     logger.warn(`${symbol}: intraday price fetch failed, using daily close ₹${fallbackPrice}`);
   }
   return fallbackPrice;
@@ -126,6 +128,7 @@ async function runStrategy() {
 
   let tradesOpened = 0;
   let tradesClosed = 0;
+  let tipsGenerated = 0;
 
   try {
     const drawdown = await checkDrawdownLimit(20);
@@ -194,8 +197,9 @@ async function runStrategy() {
               shouldClose = true;
               closeReason = "target hit";
             } else if (trade.highest_price && trade.initial_stop_loss) {
-              const atr = trade.target - trade.buy_price;
-              const trailingStop = (trade.highest_price as number) - (1.5 * atr / 2.2);
+              // Trailing stop: use 1.5× the real ATR distance (target was set at 3.0×ATR)
+              const atr = (trade.target - trade.buy_price) / 3.0;
+              const trailingStop = (trade.highest_price as number) - (1.5 * atr);
               if (currentPrice <= trailingStop) {
                 shouldClose = true;
                 closeReason = "trailing stop";
@@ -203,6 +207,17 @@ async function runStrategy() {
             } else if (currentPrice <= trade.stop_loss) {
               shouldClose = true;
               closeReason = "stop loss";
+            }
+          }
+
+          // ── Time-based exit: max 5 trading days ──────────────────────
+          // Prevents open losers from dragging on indefinitely.
+          if (!shouldClose && trade.opened_at) {
+            const daysHeld = tradingDaysBetween(new Date(trade.opened_at), new Date());
+            if (daysHeld >= 5) {
+              shouldClose = true;
+              closeReason = `max hold period (${daysHeld} trading days)`;
+              logger.warn(`${trade.symbol}: forcing exit after ${daysHeld} trading days`);
             }
           }
 
@@ -248,15 +263,13 @@ async function runStrategy() {
 
     const openSymbols = new Set((freshOpenTrades ?? []).map((t) => t.symbol));
     const openTradeCount = openSymbols.size;
+    const tipCandidates: TipCandidate[] = [];
 
     // ================================
     // 🚫 LIMIT CHECKS
     // ================================
     if (openTradeCount >= MAX_OPEN_TRADES) {
       logger.info(`Max open trades reached (${openTradeCount}/${MAX_OPEN_TRADES})`);
-      await updateStrategyRun(runStatus.runId, { status: 'SUCCESS', trades_opened: tradesOpened, trades_closed: tradesClosed });
-      await logger.flush();
-      return NextResponse.json({ openTrades: openTradeCount });
     }
 
     const { data: freshWallet } = await supabase
@@ -320,6 +333,30 @@ async function runStrategy() {
 
           const analysis = analyzeStock(closes, highs, lows, volumes);
 
+          // ─── Fetch live price from Yahoo meta ────────────────────────────
+          // closes.at(-1) from a 1y/1d daily series is the last *completed*
+          // daily bar — yesterday's close while the market is open today.
+          // meta.regularMarketPrice is the true real-time last-trade price.
+          let livePrice: number = analysis.price ?? closes[closes.length - 1];
+          try {
+            const quoteMeta = await breaker.execute(
+              'yahoo-finance',
+              () => retryWithBackoff(() => withTimeout(
+                fetchYahooChart(symbol, '1d', '1d', 8000, 1),
+                8000,
+                'Yahoo meta fetch'
+              )),
+              { threshold: 3, resetTimeoutMs: 300000 }
+            );
+            const rawLive = quoteMeta.meta?.regularMarketPrice;
+            if (typeof rawLive === 'number' && rawLive > 0) {
+              livePrice = rawLive;
+            }
+          } catch {
+            logger.debug(`${symbol}: meta price fetch failed, using daily close ₹${livePrice}`);
+          }
+          // ─────────────────────────────────────────────────────────────────
+
           // Apply market filter penalty
           if (marketBearish) {
             analysis.score = Math.max(0, analysis.score - 10);
@@ -329,7 +366,7 @@ async function runStrategy() {
             else analysis.decision = 'AVOID';
           }
 
-          return { symbol, stock, analysis, closes };
+          return { symbol, stock, analysis, closes, signalPrice: livePrice };
         })
       );
 
@@ -346,20 +383,21 @@ async function runStrategy() {
           continue;
         }
 
-        const { symbol, stock, analysis } = data as {
+        const { symbol, stock, analysis, signalPrice } = data as {
           symbol: string;
           stock: typeof stocks[0];
           analysis: ReturnType<typeof analyzeStock>;
+          signalPrice: number;
         };
 
-        // Save signal to DB
+        // Save signal to DB — use signalPrice (regularMarketPrice) not closes.at(-1)
         await supabase.from("signals").upsert({
           symbol,
           short_name: stock.name,
           decision: analysis.decision,
           score: analysis.score,
           confidence: analysis.confidence,
-          price: analysis.price,
+          price: signalPrice,
           stop_loss: analysis.stopLoss,
           target: analysis.target,
           rsi: analysis.rsi,
@@ -370,9 +408,41 @@ async function runStrategy() {
           updated_at: new Date().toISOString(),
         }, { onConflict: 'symbol,run_date' });
 
+        if (analysis.score >= 60) {
+          const atrDistance = analysis.target - analysis.entry;
+          const slDistance = analysis.entry - analysis.stopLoss;
+          const tipPrice = signalPrice;
+          const tipStopLoss = parseFloat((tipPrice - slDistance).toFixed(2));
+          const tipTarget = parseFloat((tipPrice + atrDistance).toFixed(2));
+
+          if (tipStopLoss < tipPrice && tipTarget > tipPrice) {
+            tipCandidates.push({
+              symbol,
+              shortName: stock.name,
+              sector: stock.sector,
+              technicalScore: analysis.score,
+              price: tipPrice,
+              stopLoss: tipStopLoss,
+              target: tipTarget,
+              riskReward: analysis.riskReward ?? null,
+              trend: analysis.trend,
+              signals: analysis.signals,
+              runId: runStatus.runId,
+            });
+          }
+        }
+
         // Only open new trades for BUY signals with score >= MIN_SCORE
         if (analysis.decision !== "BUY" || analysis.score < MIN_SCORE) {
           logger.debug(`${symbol}: ${analysis.decision} (score: ${analysis.score})`);
+          continue;
+        }
+
+        // ── Hard stop in BEARISH market ───────────────────────────────
+        // A -10 score penalty still allows BUY at 70+. Instead we halt
+        // all new entries when the broad market is in downtrend.
+        if (marketBearish) {
+          logger.warn(`${symbol}: BUY (score: ${analysis.score}) rejected — NIFTY is in DOWNTREND, no new entries today`);
           continue;
         }
 
@@ -407,6 +477,19 @@ async function runStrategy() {
         const priceDeviation = Math.abs(livePrice - analysis.entry) / analysis.entry;
         if (priceDeviation > 0.08) {
           logger.warn(`${symbol}: BUY rejected — live price ₹${livePrice} deviates ${(priceDeviation * 100).toFixed(1)}% from signal price ₹${analysis.entry} (threshold: 8%)`);
+          continue;
+        }
+
+        // ── Reject gap-up entries > 1.5% ────────────────────────────────
+        // When a stock gaps up significantly from yesterday's close, the
+        // stop-loss and target were computed at the lower price. Buying after
+        // the gap-up means the R:R math is invalidated before we even enter.
+        // e.g. Signal at ₹208 → SL ₹195, Target ₹248. Gap-up opens at ₹215.
+        //      Effective risk from ₹215 to ₹195 = ₹20. But target ₹248 is only ₹33 away.
+        //      Real R:R has shrunk. Skip these trades.
+        const gapUpPct = (livePrice - analysis.entry) / analysis.entry;
+        if (gapUpPct > 0.015) {
+          logger.warn(`${symbol}: BUY rejected — gapped up ${(gapUpPct * 100).toFixed(1)}% from signal price ₹${analysis.entry} (max: 1.5%)`);
           continue;
         }
 
@@ -482,6 +565,17 @@ async function runStrategy() {
       }
     }
 
+    try {
+      await expireTradeTips();
+
+      const marketTrend = marketBearish ? 'DOWNTREND' : marketBullish ? 'UPTREND' : 'SIDEWAYS';
+      const generatedTips = await generateTipsForCandidates(tipCandidates, marketTrend);
+      tipsGenerated = await persistTradeTips(generatedTips);
+      logger.info(`Generated ${tipsGenerated} smart trade tips`);
+    } catch (tipError) {
+      logger.warn('Smart trade tip generation failed', tipError);
+    }
+
     await updateStrategyRun(runStatus.runId, { status: 'SUCCESS', trades_opened: tradesOpened, trades_closed: tradesClosed });
     await logger.flush();
 
@@ -493,6 +587,7 @@ async function runStrategy() {
       openTrades: openSymbols.size,
       tradesOpened,
       tradesClosed,
+      tipsGenerated,
       availableCapital,
       totalCapital: currentBalance,
     });
@@ -504,6 +599,28 @@ async function runStrategy() {
     await logger.flush();
     return NextResponse.json({ error: "Strategy failed" }, { status: 500 });
   }
+}
+
+// ================================
+// 📅 TRADING DAYS HELPER
+// ================================
+/**
+ * Count the number of weekdays (Mon–Fri) between two dates.
+ * Used for the 5-trading-day max hold period exit.
+ */
+function tradingDaysBetween(from: Date, to: Date): number {
+  let count = 0;
+  const cursor = new Date(from);
+  cursor.setHours(0, 0, 0, 0);
+  const end = new Date(to);
+  end.setHours(0, 0, 0, 0);
+
+  while (cursor < end) {
+    cursor.setDate(cursor.getDate() + 1);
+    const day = cursor.getDay();
+    if (day !== 0 && day !== 6) count++; // exclude Sunday=0, Saturday=6
+  }
+  return count;
 }
 
 // ================================
