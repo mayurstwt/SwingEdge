@@ -3,6 +3,8 @@ import { getSupabase } from '@/lib/supabase';
 import { calculatePnL, calculateCharges } from '@/lib/wallet';
 import type { TradeDirection } from '@/lib/trading/types';
 
+import { fetchYahooChart } from '@/lib/yahoo-finance';
+
 export const dynamic = 'force-dynamic';
 
 async function getOrCreateWallet() {
@@ -57,12 +59,38 @@ export async function GET() {
       .order('created_at', { ascending: false })
       .limit(20);
 
-    // 4. Fetch recent signals for LTP lookup
+    // 4. Fetch recent signals for LTP fallback
     const { data: signals } = await supabase
       .from('signals')
       .select('symbol, price')
       .order('run_date', { ascending: false })
       .limit(100);
+
+    // 4b. Fetch LIVE Yahoo Finance prices for all OPEN trades
+    const openTrades = (trades ?? []).filter(t => t.status === 'OPEN');
+    const signalsList = [...(signals ?? [])];
+
+    if (openTrades.length > 0) {
+      await Promise.allSettled(
+        openTrades.map(async (trade) => {
+          try {
+            const quoteMeta = await fetchYahooChart(trade.symbol, '1d', '1d', 5000, 1);
+            const livePrice = quoteMeta?.meta?.regularMarketPrice;
+            if (typeof livePrice === 'number' && livePrice > 0) {
+              // Update or append to signals array for the UI to use as LTP
+              const existingIndex = signalsList.findIndex(s => s.symbol === trade.symbol);
+              if (existingIndex >= 0) {
+                signalsList[existingIndex].price = livePrice;
+              } else {
+                signalsList.push({ symbol: trade.symbol, price: livePrice });
+              }
+            }
+          } catch (err) {
+            console.error(`[wallet] Failed to fetch live price for ${trade.symbol}`, err);
+          }
+        })
+      );
+    }
 
     // 5. Calculate analytics from closed trades
     const closedTrades = (trades ?? []).filter(t => t.status === 'CLOSED');
@@ -91,7 +119,7 @@ export async function GET() {
       updated_at: wallet.updated_at,
       trades: trades ?? [],
       ledger: ledger ?? [],
-      signals: signals ?? [],
+      signals: signalsList,
       ...analytics,
     });
   } catch (err: unknown) {
