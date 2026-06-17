@@ -3,7 +3,7 @@ import { analyzeStock } from "@/lib/strategy";
 import { getMarketDataFull } from "@/lib/trading/market-data";
 import { fetchYahooChart } from "@/lib/yahoo-finance";
 import { calculatePositionSize } from "@/lib/trading/risk";
-import { getWallet, updateWallet, calculatePnL } from "@/lib/wallet";
+import { getWallet, updateWallet, calculatePnL, calculateCharges } from "@/lib/wallet";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import type { TradeDirection } from "@/lib/trading/types";
 import NIFTY50 from "@/data/stocks.json";
@@ -148,6 +148,14 @@ async function runStrategy() {
     let availableCapital = wallet.balance;
 
     // ================================
+    // 💹 COMPUTE TOTAL EQUITY (cash + open positions at live prices)
+    // ================================
+    // This is loaded *before* the trade-management loop so that position sizing
+    // uses total account equity, not just idle cash.
+    let totalEquity = wallet.balance;
+    const livePricesForEquity = new Map<string, number>();
+
+    // ================================
     // 📂 LOAD OPEN TRADES
     // ================================
     const { data: openTrades, error: openTradesError } = await supabase
@@ -160,6 +168,26 @@ async function runStrategy() {
     }
 
     const activeOpenTrades = openTrades ?? [];
+
+    // Fetch live prices for open trades to compute real-time equity
+    for (const trade of activeOpenTrades) {
+      try {
+        const { closes } = await breaker.execute(
+          'yahoo-finance',
+          () => retryWithBackoff(() => withTimeout(getMarketDataFull(trade.symbol, { range: '1d', interval: '5m' }), 10000)),
+          { threshold: 2, resetTimeoutMs: 300000 }
+        );
+        if (closes.length > 0) {
+          const lp = closes[closes.length - 1];
+          livePricesForEquity.set(trade.symbol, lp);
+          totalEquity += lp * trade.quantity;
+        } else {
+          totalEquity += trade.buy_price * trade.quantity;
+        }
+      } catch {
+        totalEquity += trade.buy_price * trade.quantity;
+      }
+    }
 
     // ================================
     // 🔁 MANAGE OPEN TRADES (Trailing Stop & Target)
@@ -215,9 +243,10 @@ async function runStrategy() {
               shouldClose = true;
               closeReason = "target hit";
             } else if (trade.highest_price && trade.initial_stop_loss) {
-              // Trailing stop: use 1.5× the real ATR distance (target was set at 3.0×ATR)
+              // Trailing stop: use 2.0× the real ATR distance (target was set at 3.0×ATR)
+              // Wider stop allows the trade to breathe and capture more upside.
               const atr = (trade.target - trade.buy_price) / 3.0;
-              const trailingStop = (trade.highest_price as number) - (1.5 * atr);
+              const trailingStop = (trade.highest_price as number) - (2.0 * atr);
               if (currentPrice <= trailingStop) {
                 shouldClose = true;
                 closeReason = "trailing stop";
@@ -228,16 +257,9 @@ async function runStrategy() {
             }
           }
 
-          // ── Time-based exit: max 5 trading days ──────────────────────
-          // Prevents open losers from dragging on indefinitely.
-          if (!shouldClose && trade.opened_at) {
-            const daysHeld = tradingDaysBetween(new Date(trade.opened_at), new Date());
-            if (daysHeld >= 5) {
-              shouldClose = true;
-              closeReason = `max hold period (${daysHeld} trading days)`;
-              logger.warn(`${trade.symbol}: forcing exit after ${daysHeld} trading days`);
-            }
-          }
+          // ── Time-based exit removed ──────────────────────────────────
+          // Removed 5-day max-hold limit to allow winning trades to run
+          // longer and capture more upside. Trailing stop handles exits.
 
           if (shouldClose) {
             const pnl = calculatePnL(
@@ -247,7 +269,7 @@ async function runStrategy() {
               trade.quantity
             );
 
-            const sellCharges = calculateSellCharges(currentPrice * trade.quantity);
+            const sellCharges = calculateCharges(currentPrice * trade.quantity, 'sell');
             const netPnL = pnl - sellCharges;
 
             await supabase
@@ -517,9 +539,9 @@ async function runStrategy() {
         const sizing = calculatePositionSize({
           price: livePrice,
           stopLoss: liveStopLoss,
-          currentEquity: currentBalance,
+          currentEquity: totalEquity,           // ← total equity (cash + open positions)
           availableCash: availableCapital,
-          riskTier: "AGGRESSIVE",
+          riskTier: "NORMAL",                   // ← reduced from AGGRESSIVE
           strategyWeight: 1,
           capitalLimitPct: MAX_CAPITAL_USAGE,
         });
@@ -530,7 +552,7 @@ async function runStrategy() {
         }
 
         const tradeValue = livePrice * sizing.quantity;
-        const buyCharges = calculateBuyCharges(tradeValue);
+        const buyCharges = calculateCharges(tradeValue, 'buy');
         const totalCost = tradeValue + buyCharges;
 
         if (totalCost > availableCapital) {
@@ -620,41 +642,13 @@ async function runStrategy() {
 }
 
 // ================================
-// 📅 TRADING DAYS HELPER
+// 📅 TRADING DAYS HELPER — REMOVED
 // ================================
-/**
- * Count the number of weekdays (Mon–Fri) between two dates.
- * Used for the 5-trading-day max hold period exit.
- */
-function tradingDaysBetween(from: Date, to: Date): number {
-  let count = 0;
-  const cursor = new Date(from);
-  cursor.setHours(0, 0, 0, 0);
-  const end = new Date(to);
-  end.setHours(0, 0, 0, 0);
-
-  while (cursor < end) {
-    cursor.setDate(cursor.getDate() + 1);
-    const day = cursor.getDay();
-    if (day !== 0 && day !== 6) count++; // exclude Sunday=0, Saturday=6
-  }
-  return count;
-}
+// tradingDaysBetween() was only used by the 5-day time-exit block, which
+// has been removed. Leaving this comment for audit trail.
 
 // ================================
 // 💸 CHARGE CALCULATIONS
 // ================================
-function calculateBuyCharges(tradeValue: number): number {
-  const brokerage = Math.min(20, tradeValue * 0.0003);
-  const transactionCharges = tradeValue * 0.0000325;
-  const gst = (brokerage + transactionCharges) * 0.18;
-  return Number((brokerage + transactionCharges + gst).toFixed(2));
-}
-
-function calculateSellCharges(tradeValue: number): number {
-  const brokerage = Math.min(20, tradeValue * 0.0003);
-  const stt = tradeValue * 0.001;
-  const transactionCharges = tradeValue * 0.0000325;
-  const gst = (brokerage + transactionCharges) * 0.18;
-  return Number((brokerage + stt + transactionCharges + gst).toFixed(2));
-}
+// Removed local calculateBuyCharges / calculateSellCharges — use the
+// canonical calculateCharges(tradeValue, 'buy' | 'sell') from @/lib/wallet.

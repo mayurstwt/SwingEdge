@@ -112,11 +112,11 @@ export function analyzeStock(
   const volRatio = volumes ? calculateVolumeRatio(volumes, 20) : 1;
 
   // ================================
-  // 📊 REFINED SCORING MODEL (v2.1)
+  // 📊 REFINED SCORING MODEL (v2.2)
   // ================================
   let score = 0;
 
-  // 1. Long-term Trend (SMA200) = 20pts
+  // 1. Long-term Trend (SMA200) = 20 pts
   if (sma200 !== null) {
     if (price > sma200) {
       score += 20;
@@ -127,7 +127,7 @@ export function analyzeStock(
     }
   }
 
-  // 2. Medium-term Momentum (SMA50 vs SMA200) = 15pts
+  // 2. Medium-term Momentum (SMA50 vs SMA200) = 15 pts
   if (sma50 !== null && sma200 !== null) {
     if (sma50 > sma200) {
       score += 15;
@@ -138,7 +138,7 @@ export function analyzeStock(
     }
   }
 
-  // 3. Short-term Momentum (Price vs SMA50) = 15pts
+  // 3. Short-term Momentum (Price vs SMA50) = 15 pts
   if (sma50 !== null) {
     if (price > sma50) {
       score += 15;
@@ -149,42 +149,45 @@ export function analyzeStock(
     }
   }
 
-  // 4. RSI (Wilder's) = 20pts
-  if (rsi > 50 && rsi < 70) {
-    score += 20;
-    signals.push('RSI in strength zone (50-70)');
+  // 4. RSI (Wilder's) – reduced weight, only rewards moderate strength
+  if (rsi > 50 && rsi < 65) {
+    score += 12;                      // reduced from 20
+    signals.push('RSI in strength zone (50-65)');
   } else if (rsi >= 30 && rsi <= 50) {
-    score += 10;
+    score += 6;                       // neutral zone
     signals.push('RSI neutral (30-50)');
   } else if (rsi < 30) {
-    // High-conviction bounce play in uptrend
+    // Only add points if price is above SMA200 (uptrend)
     if (sma200 !== null && price > sma200) {
-      score += 20;
-      signals.push('RSI oversold (<30) in uptrend - HIGH CONVICTION bounce');
+      score += 15;
+      signals.push('RSI oversold (<30) in uptrend – bounce opportunity');
     } else {
-      score += 5;
-      signals.push('RSI oversold (<30) - caution (downtrend)');
+      score += 0;                     // no points in downtrend
+      signals.push('RSI oversold (<30) but no trend confirmation');
     }
-  } else if (rsi >= 70) {
-    score += 5;
-    signals.push('RSI overbought (>70) - extended');
+  } else if (rsi >= 65) {
+    // Overbought: no positive points; add a warning signal
+    signals.push('RSI overbought (>65) – caution');
   }
 
-  // 5. Bollinger Bands (Mean Reversion) = 25pts
-  if (bb.lower !== null && bb.upper !== null) {
-    if (price <= bb.lower * 1.02) { // Tighter entry (2% from lower band)
-      score += 25;
-      signals.push('Price at lower Bollinger Band - high probability bounce');
-    } else if (bb.lower !== null && price <= bb.lower * 1.05) {
-      score += 15;
-      signals.push('Price near lower Bollinger Band');
+  // 5. Bollinger Bands (Mean Reversion) – reduced weight, trend-filtered
+  if (bb.lower !== null) {
+    if (price <= bb.lower * 1.02) {
+      // Only add points if trend is up (to avoid catching falling knives)
+      if (sma200 !== null && price > sma200) {
+        score += 15;                  // reduced from 25
+        signals.push('Price at lower Bollinger Band with uptrend – bounce potential');
+      } else {
+        score += 5;
+        signals.push('Price at lower band but no trend confirmation');
+      }
     } else if (bb.middle !== null && price > bb.middle) {
-      score += 10;
+      score += 8;                     // reduced from 10
       signals.push('Price above middle Bollinger Band');
     }
   }
 
-  // 6. MACD (Histogram) = 15pts
+  // 6. MACD (Histogram) = 15 pts – unchanged
   if (macd.histogram !== null) {
     if (macd.histogram > 0) {
       score += 15;
@@ -195,7 +198,7 @@ export function analyzeStock(
     }
   }
 
-  // 7. Volume Confirmation = 10pts
+  // 7. Volume Confirmation = 10 pts – unchanged
   if (volRatio > 1.3) {
     score += 10;
     signals.push('Strong volume confirmation');
@@ -204,11 +207,18 @@ export function analyzeStock(
     signals.push('Above average volume');
   }
 
-  // 8. Volatility Penalty
+  // 8. Volatility Penalty – unchanged
   const regime = detectMarketRegime(prices, highs, lows);
   if (regime === 'VOLATILE') {
     score -= 15;
     signals.push('Volatility penalty (-15)');
+  }
+
+  // 9. Momentum Exhaustion Filter – avoid chasing extended moves
+  const recentHigh = Math.max(...prices.slice(-20));
+  if (price >= recentHigh * 0.98 && rsi > 65) {
+    score = Math.max(0, score - 10);
+    signals.push('Near 20-day high with RSI >65 – momentum overextended (-10)');
   }
 
   // Clamp score 0-100
