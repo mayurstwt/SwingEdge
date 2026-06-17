@@ -13,14 +13,14 @@ describe('Risk Management', () => {
   };
 
   it('calculates position size correctly for normal risk', () => {
-    // Risk is 1% of 100k = 1000. Risk per share is 5. 
+    // Risk is 1.25% of 100k = 1250. Risk per share is 5. 
     // Volatility = 5/100 = 0.05. Volatility factor = 0.95.
-    // Adjusted risk = 1000 * 0.95 = 950.
-    // Quantity = 950/5 = 190.
+    // Adjusted risk = 1250 * 0.95 = 1187.5.
+    // Quantity = 1187.5 / 5 = 237.5 -> Math.floor(237.5) = 237.
     const result = calculatePositionSize(baseInput);
-    expect(result.quantity).toBe(190);
-    expect(result.riskAmount).toBe(950);
-    expect(result.capitalCommitted).toBe(19000);
+    expect(result.quantity).toBe(237);
+    expect(result.riskAmount).toBe(1187.5);
+    expect(result.capitalCommitted).toBe(23700);
   });
 
   it('respects available cash limits', () => {

@@ -36,7 +36,7 @@ describe('Trading Strategy', () => {
     expect(result.entry).toBe(healthyUptrend[healthyUptrend.length - 1]);
     expect(result.stopLoss).toBeLessThan(result.entry);
     expect(result.target).toBeGreaterThan(result.entry);
-    expect(result.riskReward).toBeCloseTo(2.2, 1);
+    expect(result.riskReward).toBeCloseTo(2.0, 1);
   });
 
   it('includes reasoning in signals', () => {

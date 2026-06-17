@@ -53,16 +53,21 @@ export interface AnalysisResult {
 // ================================
 // 🧠 MARKET REGIME DETECTION
 // ================================
-export function detectMarketRegime(prices: number[]): MarketRegime {
+export function detectMarketRegime(prices: number[], highs?: number[], lows?: number[]): MarketRegime {
   const sma200Arr = calculateSMA(prices, 200);
   const sma200 = sma200Arr[sma200Arr.length - 1];
   const rsi = calculateRSI(prices, 14);
   const price = prices[prices.length - 1];
 
-  // Use last 14 days for ATR approximation with just closes
-  const recentHighs = prices.slice(-14);
-  const recentLows = prices.slice(-14);
-  const atr = calculateATR(recentHighs, recentLows, recentHighs, 14);
+  // Use provided highs/lows for ATR if available, else approximate
+  let atr: number;
+  if (highs && lows && highs.length === prices.length) {
+    atr = calculateATR(highs, lows, prices, 14);
+  } else {
+    const approxHighs = prices.map((p, i) => (i > 0 ? Math.max(p, prices[i - 1]) : p));
+    const approxLows = prices.map((p, i) => (i > 0 ? Math.min(p, prices[i - 1]) : p));
+    atr = calculateATR(approxHighs, approxLows, prices, 14);
+  }
 
   if (atr / price > 0.035) return 'VOLATILE';
 
@@ -107,100 +112,103 @@ export function analyzeStock(
   const volRatio = volumes ? calculateVolumeRatio(volumes, 20) : 1;
 
   // ================================
-  // 📊 STATIC SCORING MODEL (per README)
+  // 📊 REFINED SCORING MODEL (v2.1)
   // ================================
   let score = 0;
 
-  // 1. Trend (SMA200) = 20pts
+  // 1. Long-term Trend (SMA200) = 20pts
   if (sma200 !== null) {
     if (price > sma200) {
       score += 20;
-      signals.push('Price above SMA200 (Bullish trend)');
+      signals.push('Price above SMA200 (Long-term Bullish)');
     } else {
       score += 5;
-      signals.push('Price below SMA200 (Bearish trend)');
+      signals.push('Price below SMA200 (Long-term Bearish)');
     }
   }
 
-  // 2. RSI = 20pts
-  if (rsi > 50 && rsi < 70) {
-    score += 20;
-    signals.push('RSI in bullish zone (50-70)');
-  } else if (rsi >= 30 && rsi <= 50) {
-    score += 10;
-    signals.push('RSI neutral (30-50)');
-  } else if (rsi < 30) {
-    // Only treat oversold as positive when price is above SMA200 (uptrend bounce)
-    // Below SMA200 = falling knife — do NOT reward it
-    if (sma200 !== null && price > sma200) {
-      score += 10;
-      signals.push('RSI oversold (<30) in uptrend - potential bounce');
-    } else {
-      score += 2;
-      signals.push('RSI oversold (<30) in downtrend - caution');
-    }
-  } else if (rsi >= 70) {
-    score += 5;
-    signals.push('RSI overbought (>70) - caution');
-  }
-
-  // 3. MACD = 15pts
-  if (macd.histogram !== null) {
-    if (macd.histogram > 0) {
-      score += 15;
-      signals.push('MACD histogram positive');
-    } else if (macd.histogram > -0.5) {
-      score += 5;
-      signals.push('MACD histogram slightly negative');
-    } else {
-      signals.push('MACD histogram negative');
-    }
-  }
-
-  // 4. SMA50 vs SMA200 (Golden/Death cross)
+  // 2. Medium-term Momentum (SMA50 vs SMA200) = 15pts
   if (sma50 !== null && sma200 !== null) {
     if (sma50 > sma200) {
-      score += 10;
+      score += 15;
       signals.push('SMA50 > SMA200 (Golden cross alignment)');
     } else {
-      score -= 5;
+      score -= 10;
       signals.push('SMA50 < SMA200 (Death cross alignment)');
     }
   }
 
-  // 5. Price vs SMA50
+  // 3. Short-term Momentum (Price vs SMA50) = 15pts
   if (sma50 !== null) {
     if (price > sma50) {
-      score += 10;
-      signals.push('Price above SMA50');
+      score += 15;
+      signals.push('Price above SMA50 (Bullish momentum)');
     } else {
       score -= 5;
-      signals.push('Price below SMA50');
+      signals.push('Price below SMA50 (Bearish momentum)');
     }
   }
 
-  // 6. Volatility = -10pts if high
-  const regime = detectMarketRegime(prices);
-  if (regime === 'VOLATILE') {
-    score -= 10;
-    signals.push('High volatility detected (-10)');
-  }
-
-  // 7. Volume confirmation
-  if (volRatio > 1.2) {
-    score += 5;
-    signals.push('Above average volume');
-  }
-
-  // 8. Bollinger Bands = 20pts
-  if (bb.lower !== null && bb.upper !== null) {
-    if (price <= bb.lower * 1.05) {
+  // 4. RSI (Wilder's) = 20pts
+  if (rsi > 50 && rsi < 70) {
+    score += 20;
+    signals.push('RSI in strength zone (50-70)');
+  } else if (rsi >= 30 && rsi <= 50) {
+    score += 10;
+    signals.push('RSI neutral (30-50)');
+  } else if (rsi < 30) {
+    // High-conviction bounce play in uptrend
+    if (sma200 !== null && price > sma200) {
       score += 20;
-      signals.push('Price near lower Bollinger Band (potential bounce)');
+      signals.push('RSI oversold (<30) in uptrend - HIGH CONVICTION bounce');
+    } else {
+      score += 5;
+      signals.push('RSI oversold (<30) - caution (downtrend)');
+    }
+  } else if (rsi >= 70) {
+    score += 5;
+    signals.push('RSI overbought (>70) - extended');
+  }
+
+  // 5. Bollinger Bands (Mean Reversion) = 25pts
+  if (bb.lower !== null && bb.upper !== null) {
+    if (price <= bb.lower * 1.02) { // Tighter entry (2% from lower band)
+      score += 25;
+      signals.push('Price at lower Bollinger Band - high probability bounce');
+    } else if (bb.lower !== null && price <= bb.lower * 1.05) {
+      score += 15;
+      signals.push('Price near lower Bollinger Band');
     } else if (bb.middle !== null && price > bb.middle) {
       score += 10;
       signals.push('Price above middle Bollinger Band');
     }
+  }
+
+  // 6. MACD (Histogram) = 15pts
+  if (macd.histogram !== null) {
+    if (macd.histogram > 0) {
+      score += 15;
+      signals.push('MACD positive histogram');
+    } else if (macd.histogram > -0.2) {
+      score += 5;
+      signals.push('MACD flattening (exhaustion)');
+    }
+  }
+
+  // 7. Volume Confirmation = 10pts
+  if (volRatio > 1.3) {
+    score += 10;
+    signals.push('Strong volume confirmation');
+  } else if (volRatio > 1.1) {
+    score += 5;
+    signals.push('Above average volume');
+  }
+
+  // 8. Volatility Penalty
+  const regime = detectMarketRegime(prices, highs, lows);
+  if (regime === 'VOLATILE') {
+    score -= 15;
+    signals.push('Volatility penalty (-15)');
   }
 
   // Clamp score 0-100

@@ -187,6 +187,24 @@ async function runStrategy() {
               .from("trades")
               .update({ highest_price: currentHigh })
               .eq("id", trade.id);
+            trade.highest_price = currentHigh; // Update local for trailing stop calc below
+          }
+
+          // ── Break-Even Logic ────────────────────────────────────────
+          // If profit reaches 50% of target distance, move SL to entry
+          // Only move if current SL is still below entry price
+          if (trade.direction === "LONG" && trade.stop_loss < trade.buy_price) {
+            const targetDistance = trade.target - trade.buy_price;
+            const halfwayPoint = trade.buy_price + (targetDistance * 0.5);
+            
+            if (currentPrice >= halfwayPoint) {
+              await supabase
+                .from("trades")
+                .update({ stop_loss: trade.buy_price })
+                .eq("id", trade.id);
+              logger.info(`${trade.symbol}: profit reached 50% of target — moving Stop Loss to BREAK-EVEN (₹${trade.buy_price})`);
+              trade.stop_loss = trade.buy_price; // Update local for exit check below
+            }
           }
 
           let shouldClose = false;
